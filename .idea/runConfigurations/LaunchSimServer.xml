@@ -1,6 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="LaunchSimServer" type="GoApplicationRunConfiguration" factoryName="Go Application">
     <output_file path="/tmp/simserver.log" is_save="true" />
+    <module name="scaler-simulator" />
     <working_directory value="$PROJECT_DIR$" />
     <go_parameters value="-i" />
     <EXTENSION ID="net.ashald.envfile">
