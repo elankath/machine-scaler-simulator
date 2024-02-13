@@ -9,7 +9,7 @@ import (
 
 	"k8s.io/client-go/kubernetes/scheme"
 
-	"github.com/elankath/machine-scaler-simulator/habitat"
+	"github.com/elankath/scaler-simulator/habitat"
 )
 
 func main() {
