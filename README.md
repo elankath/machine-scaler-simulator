@@ -1,4 +1,4 @@
-# machine-scaler-simulator
+# scaler-simulator
 Simulator that determines which worker pool must be scaled to host unschedulable pods
 
 
@@ -13,7 +13,8 @@ Simulator that determines which worker pool must be scaled to host unschedulable
 1. Ensure you are using Go version above `1.21`. Use `go version` to check your version.
 1. Run `./hack/setup.sh`
    1. This will generate a `launch.env` file in the project dir
-1. Source the `launch.env` file: `source launch.env`
+1. Source the `launch.env` file using command below (only necessary once in term session)
+   1. `set -o allexport && source launch.env && set +o allexport`
 1. Run the simulation server: `go run cmd/simserver/main.go`
 
 

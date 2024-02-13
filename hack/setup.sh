@@ -19,7 +19,7 @@ main() {
   envTestSetupCmd="setup-envtest --os $GOOS --arch $GOARCH use  -p path"
   printf "Executing: %s\n" "$envTestSetupCmd"
   binaryAssetsDir=$(eval "$envTestSetupCmd")
-  printf "BINARY_ASSETS_DIR=%s\n" "$binaryAssetsDir" > "$LAUNCH_ENV_PATH"
+  printf "BINARY_ASSETS_DIR=\"%s\"\n" "$binaryAssetsDir" > "$LAUNCH_ENV_PATH"
   printf "Wrote env to %s\n" "$LAUNCH_ENV_PATH"
 #  setup-envtest --os $(go env GOOS) --arch $(go env GOARCH) use -p path
 }
