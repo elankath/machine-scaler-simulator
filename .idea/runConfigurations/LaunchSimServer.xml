@@ -3,7 +3,6 @@
     <output_file path="/tmp/simserver.log" is_save="true" />
     <module name="scaler-simulator" />
     <working_directory value="$PROJECT_DIR$" />
-    <go_parameters value="-i" />
     <EXTENSION ID="net.ashald.envfile">
       <option name="IS_ENABLED" value="true" />
       <option name="IS_SUBST" value="true" />
@@ -15,10 +14,10 @@
         <ENTRY IS_ENABLED="true" PARSER="env" IS_EXECUTABLE="false" PATH="launch.env" />
       </ENTRIES>
     </EXTENSION>
-    <kind value="PACKAGE" />
+    <kind value="FILE" />
     <package value="github.com/elankath/scaler-simulator" />
     <directory value="$PROJECT_DIR$" />
-    <filePath value="$PROJECT_DIR$" />
+    <filePath value="$PROJECT_DIR$/cmd/simserver/main.go" />
     <method v="2" />
   </configuration>
 </component>

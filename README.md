@@ -16,7 +16,8 @@ Simulator that determines which worker pool must be scaled to host unschedulable
 1. Source the `launch.env` file using command below (only necessary once in term session)
    1. `set -o allexport && source launch.env && set +o allexport`
 1. Run the simulation server: `go run cmd/simserver/main.go`
-
+1. The `KUBECONFIG` for simulated control plane should be generated at `/tmp/simulation-kubeconfig.yaml`
+   1. `export KUBECONFIG=/tmp/simulation-kubeconfig.yaml`
 
 ### Executing within Goland/Intellij IDE
 

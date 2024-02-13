@@ -84,7 +84,7 @@ func CreateKubeconfigFileForRestConfig(restConfig rest.Config) (string, error) {
 		CurrentContext: "default-context",
 		AuthInfos:      authinfos,
 	}
-	kubeConfigFile, _ := os.Create("/tmp/mcv2poc-kubeconfig.yaml")
+	kubeConfigFile, _ := os.Create("/tmp/simulation-kubeconfig.yaml")
 	//kubeConfigFile, _ := os.CreateTemp("/tmp/", "kubeconfig")
 	err := clientcmd.WriteToFile(clientConfig, kubeConfigFile.Name())
 	if err != nil {

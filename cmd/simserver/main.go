@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -19,16 +18,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	apiServerPort := "50000" // TODO: put this in env too
+	//apiServerPort := "50000" // TODO: put this in env too
 	habitatAccess, err := habitat.InitHabitat(scheme.Scheme, binaryAssetsDir, map[string]string{
-		"secure-port": apiServerPort,
+		//		"secure-port": apiServerPort,
 	})
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("error initializing habtat", "error", err)
+		os.Exit(2)
 	}
-	//habitatAccess.Environment.
-	//fmt.Printf("setup env test: %v\n", habitatAccess)
-
 	slog.Info("INITIALIZATION COMPLETE!")
 	// wait the signal
 	slog.Info("Waiting until quit...")
