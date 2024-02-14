@@ -12,7 +12,7 @@ Scaling Simulator that determines which garden worker pool must be scaled to hos
 1. Source the `launch.env` file using command below (only necessary once in term session)
    1. `set -o allexport && source launch.env && set +o allexport`
 1. Run the simulation server: `go run cmd/simserver/main.go`
-1. The `KUBECONFIG` for simulated control plane should be generated at `/tmp/simulation-kubeconfig.yaml`
+1. The `KUBECONFIG` for simulated control plane should be generated at `/tmp/scalesim-kubeconfig.yaml`
    1. `export KUBECONFIG=/tmp/simulation-kubeconfig.yaml`
 
 ### Executing within Goland/Intellij IDE
@@ -130,6 +130,28 @@ There is one node started in the first zone `a`.
 1. Deploy `Pod-X` mandating distribution of each replica on separate zone.
 1. Simulator should recommend scaling Nodes for zones `b`, `c`
 
+#### Scenario: High Load with large number of Diff Pods
+
+Check out how much time would such a simulation of node scale up take here.
+- 400+pods
+
+#### Scenaio: Worker Pool Expansion By Priority 
+
+- Scale up WP in order of priority until max is reached, 
+, then move to next WP in priority.
+- Analogues our CA priority expander.
+
+PROBLEM:
+- We need a better algo than launching virtual nodes one-by-one across pools with priority.
+- we need to measure how fast this approach is using
+virtual nodes with large number of Pods aand Worker Pools.
+- TODO: Look into whether kube-scheduler has  recommendation advice.
+
+
+#### Scenaio: Workload Redistribution (STRETCH)
+- Kerpenter like mechanics
+
+
 ### Simple Scale Down of empty node(s). 
 We have a worker pool with  started nodes and min-0.
 
@@ -146,3 +168,27 @@ TODO: Maddy will describe this.
 TODO: describe me
 
 
+### MoM 14th
+Vedran's concerns:
+- Load with large number of Pods and Pools
+- Reduce computational weight when where is a priority expander. Check performance.
+- How to determine scheduler ran into error and failed assignment.
+- How easy is it to consume the result of the kube-scheduler
+in case there is no assigned node.
+- machine selector approach may not be computationally scalable ??
+  - in order to be computationally feasible we need the
+node priiority scores from the scheduler.
+
+
+
+### TODO
+- make `types.go`
+- make a `simulator.ShootClusterModel`
+- make an interface type `simulator.`
+- rename `Access` to `ShadowCluster`
+- make a package `scheduler` which has a `NewSchedulerAccess`
+- and an interface `SchedulerAccess`
+- name `habitat` to `bootstrap`
+- rename `habitat.InitHabitat` to `bootstrap.InitShadowCluster`
+with 2 implementations: `in-proces` `out-process
+- make a method on `ConrolePlane`

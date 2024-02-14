@@ -1,4 +1,4 @@
-package habitat
+package virtualclient
 
 import (
 	"fmt"
@@ -13,19 +13,26 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+
+	scalesim "github.com/elankath/scaler-simulator"
 )
 
-var kubeConfigPath = "/tmp/simulation-kubeconfig.yaml"
+var kubeConfigPath = "/tmp/scalesim-kubeconfig.yaml"
 
-type Access struct {
+type access struct {
 	Client               client.Client
 	RestConfig           *rest.Config
 	Environment          *envtest.Environment
 	KubeSchedulerProcess *os.Process
-	KubeconfigPath       string
 }
 
-func InitHabitat(scheme *runtime.Scheme, binaryAssetsDir string, apiServerFlags map[string]string) (*Access, error) {
+var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implements I.
+
+func (a *access) KubeConfigPath() string {
+	return kubeConfigPath
+}
+
+func InitializeAccess(scheme *runtime.Scheme, binaryAssetsDir string, apiServerFlags map[string]string) (scalesim.VirtualClusterAccess, error) {
 	habitatEnv := &envtest.Environment{
 		Scheme:                   scheme,
 		BinaryAssetsDirectory:    binaryAssetsDir,
@@ -62,16 +69,15 @@ func InitHabitat(scheme *runtime.Scheme, binaryAssetsDir string, apiServerFlags 
 	//	return nil, fmt.Errorf("error starting kube-scheduler: %w", err)
 	//}
 
-	return &Access{
+	return &access{
 		Client:      k8sClient,
 		RestConfig:  cfg,
 		Environment: habitatEnv,
 		//KubeSchedulerProcess: schedulerProcess,
-		KubeconfigPath: kubeConfigPath,
 	}, nil
 }
 
-func (a *Access) Shutdown() (err error) {
+func (a *access) Shutdown() (err error) {
 	err = a.Environment.Stop()
 	if err != nil {
 		return err
