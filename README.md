@@ -4,6 +4,24 @@
  
 Scaling Simulator that determines which garden worker pool must be scaled to host unschedulable pods
 
+## Setup
+
+1. Ensure you are using Go version above `1.21`. Use `go version` to check your version.
+1. Run `./hack/setup.sh`
+   1. This will generate a `launch.env` file in the project dir
+1. Source the `launch.env` file using command below (only necessary once in term session)
+   1. `set -o allexport && source launch.env && set +o allexport`
+1. Run the simulation server: `go run cmd/simserver/main.go`
+1. The `KUBECONFIG` for simulated control plane should be generated at `/tmp/simulation-kubeconfig.yaml`
+   1. `export KUBECONFIG=/tmp/simulation-kubeconfig.yaml`
+
+### Executing within Goland/Intellij IDE
+
+1. Install the [EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) plugin.
+1. There is a run configuration already checked-in at `.idea/.idea/runConfigurations/LaunchSimServer.xml`
+   1. This will automatically source the generated `.env` leveraging the plugin
+   2. You should be able to execute using `Run > LaunchSimServer`
+
 
 ## Objectives
 
@@ -121,31 +139,10 @@ We have a worker pool with  started nodes and min-0.
 
 ### Scale Down of un-needed node (STRETCH)
 This requires resource utilization computation and we won't do this for now.
-Maddy will describe this.
 
-#### WP Out of Capacity  (not possible for now)
+TODO: Maddy will describe this.
 
-There are 2 existing worker pools with different machine types. One machine type (WP-A) is exhausted.
-
-SubCase-A
- 1. A Pod with X replicas that is assignable into either WP is deployed.
- 1. Simulator should assign Pod to WP-A which
+#### WP Out of Capacity (STRETCH)
+TODO: describe me
 
 
-## Setup
-
-1. Ensure you are using Go version above `1.21`. Use `go version` to check your version.
-1. Run `./hack/setup.sh`
-   1. This will generate a `launch.env` file in the project dir
-1. Source the `launch.env` file using command below (only necessary once in term session)
-   1. `set -o allexport && source launch.env && set +o allexport`
-1. Run the simulation server: `go run cmd/simserver/main.go`
-1. The `KUBECONFIG` for simulated control plane should be generated at `/tmp/simulation-kubeconfig.yaml`
-   1. `export KUBECONFIG=/tmp/simulation-kubeconfig.yaml`
-
-### Executing within Goland/Intellij IDE
-
-1. Install the [EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) plugin.
-1. There is a run configuration already checked-in at `.idea/.idea/runConfigurations/LaunchSimServer.xml`
-   1. This will automatically source the generated `.env` leveraging the plugin
-   2. You should be able to execute using `Run > LaunchSimServer`
