@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
+	"syscall"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -13,11 +15,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 )
 
+var kubeConfigPath = "/tmp/simulation-kubeconfig.yaml"
+
 type Access struct {
-	Client         client.Client
-	RestConfig     *rest.Config
-	Environment    *envtest.Environment
-	KubeconfigPath string
+	Client               client.Client
+	RestConfig           *rest.Config
+	Environment          *envtest.Environment
+	KubeSchedulerProcess *os.Process
+	KubeconfigPath       string
 }
 
 func InitHabitat(scheme *runtime.Scheme, binaryAssetsDir string, apiServerFlags map[string]string) (*Access, error) {
@@ -46,21 +51,43 @@ func InitHabitat(scheme *runtime.Scheme, binaryAssetsDir string, apiServerFlags 
 		return nil, fmt.Errorf("failed to create new client: %w", err)
 	}
 
-	kubeConfigPath, err := CreateKubeconfigFileForRestConfig(*cfg)
+	err = CreateKubeconfigFileForRestConfig(*cfg)
 	if err != nil {
 		return nil, err
 	}
 	slog.Info("Wrote kubeconfig", "kubeconfig", kubeConfigPath)
 
+	//schedulerProcess, err := StartScheduler(binaryAssetsDir)
+	//if err != nil {
+	//	return nil, fmt.Errorf("error starting kube-scheduler: %w", err)
+	//}
+
 	return &Access{
-		Client:         k8sClient,
-		RestConfig:     cfg,
-		Environment:    habitatEnv,
+		Client:      k8sClient,
+		RestConfig:  cfg,
+		Environment: habitatEnv,
+		//KubeSchedulerProcess: schedulerProcess,
 		KubeconfigPath: kubeConfigPath,
 	}, nil
 }
 
-func CreateKubeconfigFileForRestConfig(restConfig rest.Config) (string, error) {
+func (a *Access) Shutdown() (err error) {
+	err = a.Environment.Stop()
+	if err != nil {
+		return err
+	}
+	if a.KubeSchedulerProcess != nil { //TODO: launch kube-scheduler as part of simulator.
+		err = a.KubeSchedulerProcess.Signal(syscall.SIGTERM)
+		if err != nil {
+			return err
+		}
+		slog.Info("waiting for kube-scheduler to exit...", "signal", syscall.SIGTERM.String())
+		_, err = a.KubeSchedulerProcess.Wait()
+		return err
+	}
+}
+
+func CreateKubeconfigFileForRestConfig(restConfig rest.Config) error {
 	clusters := make(map[string]*clientcmdapi.Cluster)
 	clusters["default-cluster"] = &clientcmdapi.Cluster{
 		Server:                   restConfig.Host,
@@ -84,11 +111,24 @@ func CreateKubeconfigFileForRestConfig(restConfig rest.Config) (string, error) {
 		CurrentContext: "default-context",
 		AuthInfos:      authinfos,
 	}
-	kubeConfigFile, _ := os.Create("/tmp/simulation-kubeconfig.yaml")
+	kubeConfigFile, _ := os.Create(kubeConfigPath)
 	//kubeConfigFile, _ := os.CreateTemp("/tmp/", "kubeconfig")
 	err := clientcmd.WriteToFile(clientConfig, kubeConfigFile.Name())
 	if err != nil {
-		return "", fmt.Errorf("failed to create kubeconfig: %w", err)
+		return fmt.Errorf("failed to create kubeconfig: %w", err)
 	}
-	return kubeConfigFile.Name(), nil
+	return nil
+}
+
+func StartScheduler(binaryAssetsDir string) (*os.Process, error) {
+	kubeSchedulerPath := fmt.Sprintf("%s/kube-scheduler", binaryAssetsDir)
+	command := exec.Command(kubeSchedulerPath, "--kubeconfig", kubeConfigPath)
+	command.Stderr = os.Stderr
+	command.Stdout = os.Stdout
+	slog.Info("launching kube-scheduler", "command", command)
+	err := command.Start()
+	if err != nil {
+		return nil, err
+	}
+	return command.Process, nil
 }

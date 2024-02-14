@@ -35,9 +35,9 @@ func main() {
 	signal.Notify(quit, syscall.SIGTERM, os.Interrupt)
 	s := <-quit
 	slog.Warn("Cleanup and Exit!", "signal", s.String())
-	err = habitatAccess.Environment.Stop()
+	err = habitatAccess.Shutdown()
 	if err != nil {
-		slog.Warn("error stopping environment", "error", err)
+		slog.Warn("error in shutdown", "error", err)
 		os.Exit(10)
 	}
 }
