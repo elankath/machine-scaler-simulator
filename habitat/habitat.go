@@ -85,6 +85,7 @@ func (a *Access) Shutdown() (err error) {
 		_, err = a.KubeSchedulerProcess.Wait()
 		return err
 	}
+	return
 }
 
 func CreateKubeconfigFileForRestConfig(restConfig rest.Config) error {
