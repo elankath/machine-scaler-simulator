@@ -1,81 +1,121 @@
 # scaler-simulator
-Simulator that determines which worker pool must be scaled to host unschedulable pods
+
+> This project is WIP - DO NOT TRY
+ 
+Scaling Simulator that determines which garden worker pool must be scaled to host unschedulable pods
 
 
-## Goals
+## Objectives
 
-1. Advice which worker pool must be extended to host the unschedulable pod(s).
-1. Simulate scaling the adviced worker pool and pod scheduling on scaled nodes and compare real-world against simulation.
-1. simulation connects to the garden cluster
-1. get the worker pool info.
-1. synchronizes the cluster info, replicate the same in the simulated cluster. 
-1. Lets say there are some unschedulabe pods.
-1. then create simulated nodes for all the worker pools.
-1. check which node does the simulation scheduler assigns the pod to.
-1. print out the worker pool that the node belongs to and say this is the guy that will be scaled.
+> TODO: REFINE THE BELOW
 
-### Simulator
+Given a garden shoot configured with different worker pools and Pod(s) to be deployed on the shoot cluster: the simulator
+will report the following advice:
+ 1. In case scale-up is needed, the simulator will recommend which worker pool must be scaled-up to host the unschedulable pod(s).
+ 1. The simulator will recommend which node belonging to which worker pool will host the Pod(s)
+ 1. ?? Then check will be made against real-shoot cluster on which Pods will be deployed. 
+    The simulator's advice will be verified against real-world node scaleup and pod-assignment.
+
+The above will be repeated for different worker pool and Pod specs representing various simulation scenarios 
+
+
+### Simulator Mechanics
+
+The Simulator works by replicating shoot cluster into its virtual cluster by maintaining its independent copy of 
+api server+scheduler. The engine then executes various simulation scenarios.
+
+```mermaid
+graph LR
+    engine--1:GetShootWorkerPooolAndClusterData-->ShootCluster
+    subgraph ScalerSimulator
+       engine--2:PopulateVirtualCluster-->apiserver
+       engine--3:RunSimulation-->simulation
+       simulation--DeployPods-->apiserver
+       simulation--LauchNodesIfPodUnschedulable-->apiserver
+       simulation--QueryAssignedNode-->apiserver
+       scheduler--AssignPodToNode-->apiserver
+       simulation--ReportAdvice-->advice
+    end
+    advice[(ScalingRecommendation)]
+```
+
+### Simulation Scenarios
+
+#### Scenario: Simple Scale from zero
+
+We have two worker groups with min=1, max=1 with machine types: `m5.large`, `m5.2xlarge` respectively.
 
 ```mermaid
 graph TB
+ subgraph WP-B
+  SpecB["machineType: m5.2xlarge\nmin:0,max:1"]
+ end
+ subgraph WP-A
+  SpecA["machineType: m5.large\nmin:1,max:1"]
+ end
+ ```
+##### Step-A
+   1. We will assign a single pod with large request so that it can only fit into `WP_B`
+   1. The simulation must recommend scale up of `WP_B` group from zero and say pod is assigned to this pool.
 
-Simulator<-- sync WP+cluster info -->ShootCluster
-```
+##### Step-B
+  1. We will deploy a pod with a small request, so it can fit into either node.
+  1. The simulation must say that pod is assigned to launched node in `WP_B`
 
-### TODO: Get Model Info.
-1. Use gardenctl to login into project
-1. Then exec kubectl to get the shoot.
-1. Use gardenct to login to shoot cluster
-1. Get exec kubectl to get real nodes and replicate them as fake nodes in simulated api server.
+##### Step-C
+   1. We will deploy a pod with a request that exceeds current capacity of launched node in `WP_B`, but fits for first pool `WP_A`.
+   1. The simulation must advice that pod is assigned to node of fist group `WP_A`.
 
-### Simulation Use cases
+#### Scenario: Tainted Worker Pools. 
 
-#### Scale from zero
-1. We have two worker groups with n=0, m=2 with machine types: `m5.large`, `m5.2xlarge` respectively.
-machine types.
 
-SubCase-A
-   1. We will assign a single pods with large request so that it can only fit into `m5.2xlarge`.
-   1. The simulation must scale up the second worker group from zero and say pod is assigned to this..
+```mermaid
+graph TB
+ subgraph WP-B
+  SpecB["machineType: m5.large\nmin:1,max:2"]
+ end
+ subgraph WP-A
+  SpecA["machineType: m5.large\nmin:1,max:2,Taint:foo=bar:NoSchedule"]
+ end
+ ```
 
-SubCase-B
-  1. We will assign a pod with a small request, so it can fit into either node.
-  1. The simulation must say that pod is assigned to second node (least waste)
+- First worker pool is tainted with `NoSchedule`.
+- 2 Pod spec: X,Y are created: one with toleration to the taint and one without repectively. 
 
-SubCase-C
-   1. We will assign a pod with a request that exceeds capacity of existing node in 2nd worker group, but fits for first pool.
-   1. The simulation must say that pod is assigned to first node of fist group(least waste)
+##### Step-A
+  1. Replicas of Pod-X are deployed which crosses the capacity of tainted node belonging to `WP-A`
+  1. The simulation should advice scaling `WP-A` and assign the Pod to tainted nodes of `WP-A`.
 
-#### 2 Existing Worker Pools with 1 Node each
+##### Step-B
+   1. More replicas of `Pod-X` are created which cannot fit into `WP-A` since it has reached its  max.
+   1. The simulator should report `WP-A` max is exceeded, pod replicas remain unschedulable and no other WP should be scaled.
 
-First worker pool is tainted with `NoSchedule`.
-2 Pod spec are created: one with toleration to the taint and one without. 
+##### Step-C
+  1. Many replicas of the `Pod-Y` (spec without toleration) are deployed which crosses the capacity of existing node in   `WP-B`
+  1. The simulation should scale `WP-B` and assign the Pod to nodes of `WP-B` 
 
-SubCase-A
-  1. Pod spec that can fit into any node is created with toleration to the taint.
-  1. Many replicas of the Pod are deployed which crosses the capacity of node belonging to WP-A
-  1. The simulation should scale worker pool-A and assign the Pod to nodes of WP-A (tainted)
+#### Scenario: Topology Spread Constraints
 
-SubCase-B (capacity)
-   1. More replicas of Pod-A are created whic cannot fit into WP-A max.
-   1. The simulation should say max is exceeded, pod replicas remain unschedulable and no other WP should be scaled.
+```mermaid
+graph TB
+ subgraph WP-A
+  SpecB["machineType: m5.large\nmin:1,max:3, zones:a,b,c"]
+ end
+ ```
 
-SubCase-C
-  1. Pod spec that can fit into any node is created without toleration to the taint. 
-  1. Many replicas of the Pod are deployed which crosses the capacity of node belonging to WP-B
-  1. The simulation should scale WP-B and assign the Pod to nodes of WP-B (untainted)
+One Existing Worker Pool with 3 assigned zones 
+There is one node started in the first zone `a`.
 
-#### One Existing Worker Pool with 3 assigned zones 
-There is one node started in the first zone.
+`POD-X` has spec with `replicas:3`, `topologySpreadConstraints` with a `maxSkew: 1` and `whenUnsatisfiable: DoNotSchedule`
 
-SubCase-A
-1. A Pod with 3 replicas with TSC (maxskew=1) mandating distribution of each replica on separate zone is deployed
-1. Simulator should scale Nodes for other zones
+###### Step-A
+1. Deploy `Pod-X` mandating distribution of each replica on separate zone.
+1. Simulator should recommend scaling Nodes for zones `b`, `c`
 
 ### Simple Scale Down of empty node(s). 
 We have a worker pool with  started nodes and min-0.
 
-SubCase-A
+##### Step-A
  1. All Pods are un-deployed.
  1. After `scaleDownThreshold` time, the WP should be scaled down to min.
 
