@@ -18,6 +18,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	gardenShootName := os.Getenv("GARDEN_SHOOT_NAME")
+	if len(gardenShootName) == 0 {
+		slog.Error("GARDEN_SHOOT_NAME env must be set")
+		os.Exit(1)
+	}
+
+	gardenProjectName := os.Getenv("GARDEN_PROJECT_NAME")
+	if len(gardenProjectName) == 0 {
+		slog.Error("GARDEN_PROJECT_NAME env must be set")
+		os.Exit(1)
+	}
+
+	// TODO: uncomment below lines. They are commented because otherwise there are complains that the var is not being used
+	// var model gardenclient.Model
+	// model = *gardenclient.Connect()
+
 	//apiServerPort := "50000" // TODO: put this in env too
 	habitatAccess, err := habitat.InitHabitat(scheme.Scheme, binaryAssetsDir, map[string]string{
 		//		"secure-port": apiServerPort,
