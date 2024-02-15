@@ -17,6 +17,7 @@ Scaling Simulator that determines which garden worker pool must be scaled to hos
    1. `export KUBECONFIG=/tmp/simulation-kubeconfig.yaml`
    1. `kubectl get ns`
 
+
 ### Executing within Goland/Intellij IDE
 
 1. Install the [EnvFile](https://plugins.jetbrains.com/plugin/7861-envfile) plugin.
@@ -24,6 +25,14 @@ Scaling Simulator that determines which garden worker pool must be scaled to hos
    1. This will automatically source the generated `launch.env` leveraging the plugin
    2. You should be able to execute using `Run > LaunchSimServer`
 
+## Usage
+
+
+### Commands
+
+#### Sync Virtual Cluster with Shoot Cluster
+
+`curl -XPOST localhost:8080/api/sync-shoot-nodes`
 
 ## Objectives
 
