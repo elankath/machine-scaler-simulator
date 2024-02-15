@@ -39,10 +39,6 @@ func (s *shootAccess) ShootName() string {
 	return s.shootName
 }
 
-var (
-	codec runtime.Codec
-)
-
 var _ scalesim.ShootAccess = (*shootAccess)(nil)
 
 func InitShootAccess(projectName, shootName string) (scalesim.ShootAccess, error) {
@@ -70,7 +66,7 @@ func InitShootAccess(projectName, shootName string) (scalesim.ShootAccess, error
 		gardencore.SchemeGroupVersion,
 		corev1.SchemeGroupVersion,
 	})
-	codec = serializer.NewCodecFactory(configScheme).CodecForVersions(ser, ser, versions, versions)
+	codec := serializer.NewCodecFactory(configScheme).CodecForVersions(ser, ser, versions, versions)
 
 	return &shootAccess{
 		projectName: projectName,
@@ -119,7 +115,7 @@ func (s *shootAccess) GetNodes() ([]corev1.Node, error) {
 	for _, item := range list.Items {
 		var node corev1.Node
 		bytes := item.Raw
-		decodedObj, err := runtime.Decode(codec, bytes)
+		decodedObj, err := runtime.Decode(s.codec, bytes)
 		if err != nil {
 			slog.Error("error decoding node", "error", err)
 			return nil, err
@@ -127,93 +123,5 @@ func (s *shootAccess) GetNodes() ([]corev1.Node, error) {
 		node = *(decodedObj.(*corev1.Node))
 		nodeList = append(nodeList, node)
 	}
-	return nodeList, nil
-}
-
-func GetShootYaml() (*gardencore.Shoot, error) {
-	workingDir, err := os.Getwd()
-	if err != nil {
-		slog.Error("error fetching present working dir", "error", err)
-		return nil, err
-	}
-	command := exec.Command(workingDir + "/gardenclient/getshoot.sh")
-
-	cmdOutput, err := command.Output()
-	if err != nil {
-		slog.Error("error running command", "error", err)
-		return nil, err
-	}
-
-	var shoot gardencore.Shoot
-
-	configScheme := runtime.NewScheme()
-	utilruntime.Must(gardencore.AddToScheme(configScheme))
-	ser := json.NewSerializerWithOptions(json.DefaultMetaFactory, configScheme, configScheme, json.SerializerOptions{
-		Yaml:   true,
-		Pretty: false,
-		Strict: false,
-	})
-	versions := schema.GroupVersions([]schema.GroupVersion{
-		gardencore.SchemeGroupVersion,
-	})
-	codec = serializer.NewCodecFactory(configScheme).CodecForVersions(ser, ser, versions, versions)
-	obj, err := runtime.Decode(codec, cmdOutput)
-	if err != nil {
-		slog.Error("error decoding command output", "error", err)
-		return nil, err
-	}
-
-	shoot = *(obj.(*gardencore.Shoot))
-
-	return &shoot, nil
-}
-
-func GetNodeListYaml() ([]corev1.Node, error) {
-	workingDir, err := os.Getwd()
-	if err != nil {
-		slog.Error("error fetching present working dir", "error", err)
-		return nil, err
-	}
-	command := exec.Command(workingDir + "/gardenclient/getnodelist.sh")
-
-	cmdOutput, err := command.Output()
-	if err != nil {
-		slog.Error("error running command", "error", err)
-		return nil, err
-	}
-
-	var list corev1.List
-	var nodeList []corev1.Node
-
-	configScheme := runtime.NewScheme()
-	utilruntime.Must(corev1.AddToScheme(configScheme))
-	ser := json.NewSerializerWithOptions(json.DefaultMetaFactory, configScheme, configScheme, json.SerializerOptions{
-		Yaml:   true,
-		Pretty: false,
-		Strict: false,
-	})
-	versions := schema.GroupVersions([]schema.GroupVersion{
-		corev1.SchemeGroupVersion,
-	})
-	codec = serializer.NewCodecFactory(configScheme).CodecForVersions(ser, ser, versions, versions)
-	obj, err := runtime.Decode(codec, cmdOutput)
-	if err != nil {
-		slog.Error("error decoding command output", "error", err)
-		return nil, err
-	}
-
-	list = *(obj.(*corev1.List))
-	for _, item := range list.Items {
-		var node corev1.Node
-		bytes := item.Raw
-		decodedObj, err := runtime.Decode(codec, bytes)
-		if err != nil {
-			slog.Error("error decoding node", "error", err)
-			return nil, err
-		}
-		node = *(decodedObj.(*corev1.Node))
-		nodeList = append(nodeList, node)
-	}
-
 	return nodeList, nil
 }

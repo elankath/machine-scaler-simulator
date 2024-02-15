@@ -6,15 +6,16 @@ Scaling Simulator that determines which garden worker pool must be scaled to hos
 
 ## Setup
 
-1. Ensure you are using Go version above `1.21`. Use `go version` to check your version.
+1. Ensure you are using Go version `1.22`. Use `go version` to check your version.
 1. Run `./hack/setup.sh`
    1. This will generate a `launch.env` file in the project dir
 1. Take a look at generated `launch.env` and change params to your liking if you want.
 1. Source the `launch.env` file using command below (only necessary once in term session)
    1. `set -o allexport && source launch.env && set +o allexport`
-1. Run the simulation server: `go run cmd/simserver/main.go`
+1. Run the simulation server: `go run cmd/scalesim/main.go`
 1. The `KUBECONFIG` for simulated control plane should be generated at `/tmp/scalesim-kubeconfig.yaml`
    1. `export KUBECONFIG=/tmp/simulation-kubeconfig.yaml`
+   1. `kubectl get ns`
 
 ### Executing within Goland/Intellij IDE
 

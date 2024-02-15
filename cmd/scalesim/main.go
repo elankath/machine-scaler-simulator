@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +14,7 @@ import (
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/gardenclient"
+	"github.com/elankath/scaler-simulator/service"
 	"github.com/elankath/scaler-simulator/virtualcluster"
 )
 
@@ -49,9 +53,29 @@ func main() {
 		os.Exit(3)
 	}
 
-	time.Sleep(5 * time.Second)
-	slog.Info("INITIALIZATION COMPLETE!")
-	waitForSignalAndShutdown(virtualClusterAccess)
+	engine, err := service.NewEngine(virtualClusterAccess, shootAccess)
+	if err != nil {
+		slog.Error("cannot initialize simulator service", "error", err)
+		os.Exit(4)
+	}
+
+	httpServer := &http.Server{
+		Addr:    net.JoinHostPort("localhost", "8080"),
+		Handler: engine,
+	}
+
+	time.Sleep(3 * time.Second)
+	slog.Info("INITIALIZATION COMPLETE!!", "service-addr", httpServer.Addr)
+
+	go waitForSignalAndShutdown(virtualClusterAccess, httpServer)
+
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		slog.Error("service cannot listen/serve, SHUTTING DOWN.", "error", err)
+		err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+		if err != nil {
+			slog.Error("cannot term self!", "error", err)
+		}
+	}
 }
 
 func validateShootAccess(shootAccess scalesim.ShootAccess) {
@@ -70,10 +94,9 @@ func validateShootAccess(shootAccess scalesim.ShootAccess) {
 		return
 	}
 	slog.Info("retrieved shoot nodes", "num-nodes", len(shootNodes))
-
 }
 
-func waitForSignalAndShutdown(virtualAccess scalesim.VirtualClusterAccess) {
+func waitForSignalAndShutdown(virtualAccess scalesim.VirtualClusterAccess, httpServer *http.Server) {
 	slog.Info("Waiting until quit...")
 	quit := make(chan os.Signal, 1)
 
@@ -81,6 +104,11 @@ func waitForSignalAndShutdown(virtualAccess scalesim.VirtualClusterAccess) {
 	signal.Notify(quit, syscall.SIGTERM, os.Interrupt)
 	s := <-quit
 	slog.Warn("Cleanup and Exit!", "signal", s.String())
+
+	if err := httpServer.Shutdown(context.Background()); err != nil {
+		slog.Error("cannot shut down http service", "error", err)
+	}
+
 	err := virtualAccess.Shutdown()
 	if err != nil {
 		slog.Warn("error in shutdown", "error", err)

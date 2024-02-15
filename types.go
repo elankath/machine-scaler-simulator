@@ -1,26 +1,37 @@
 package scalesim
 
 import (
+	"context"
+	"net/http"
+
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 )
+
+// Engine is the primary simulation driver facade of the scaling simulator. Since Engine register routes for driving simulation scenarios it extends http.Handler
+type Engine interface {
+	http.Handler
+}
 
 // VirtualClusterAccess represents access to the virtualcluster cluster managed by the simulator that shadows the real cluster
 type VirtualClusterAccess interface {
 	// KubeConfigPath gets path to the kubeconfig.yaml file that can be used by kubectl to connect to this vitual cluster
 	KubeConfigPath() string
 
+	//TODO: AddNodes
+	//TODO: AddPods
+
+	// ClearAll clears all k8s objects from the virtual cluster.
+	ClearAll(ctx context.Context) error
+
+	// ClearNodes  clears all nodes from the virtual cluster
+	ClearNodes(ctx context.Context) error
+
+	// ClearPods clears all nodes from the virtual cluster
+	ClearPods(ctx context.Context) error
+
 	// Shutdown shuts down all components of the virtualcluster cluster. Returns err encountered during shutdown if any.
 	Shutdown() error
-
-	//TODO: CreateNodes
-	//TODO: CreatePods
-	//TODO: ClearAll()
-	//TODO: Restart()
-
-	// RestConfig method returns the client-go rest.Config that can be used by clients to connect to the virtualcluster cluster.
-	// No, Dont expose this. use high-level operations to abstract functionality.
-	//RestConfig() *rest.Config
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster

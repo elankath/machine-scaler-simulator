@@ -53,9 +53,19 @@ function validate_args() {
   fi
 }
 
+validate_go_version() {
+  local goVer
+  goVer=$(go version)
+  if [[ ! "$goVer" == *"go1.22"* ]]; then
+    echo -e "Go 1.22 required to run scalesim"
+    exit 2
+  fi
+}
+
 main() {
   parse_flags "$@"
   validate_args
+  validate_go_version
   local GOOS GOARCH binaryAssetsDir kubeSchedulerBinaryUrl launchEnv kubeSchedulerGoMainFile
 
   GOOS=$(go env GOOS)
@@ -86,7 +96,7 @@ main() {
   kubeSchedulerGoMainFile="$KUBE_SOURCE_DIR/cmd/kube-scheduler/scheduler.go"
   if [[ ! -f  $kubeSchedulerGoMainFile ]]; then
     echo -e "No kube-scheduler Go main file at: $kubeSchedulerGoMainFile"
-    exit 2
+    exit 3
   fi
 
   if [[ ! -f "$binaryAssetsDir/kube-scheduler" ]]; then
