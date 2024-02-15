@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 PROJECT_DIR="$(cd "$(dirname "${SCRIPT_DIR}")" &>/dev/null && pwd)"
 LAUNCH_ENV_FILE="launch.env"
 LAUNCH_ENV_PATH="$PROJECT_DIR/$LAUNCH_ENV_FILE"
+K8S_SRC_TAR_URL="https://github.com/kubernetes/kubernetes/archive/refs/tags/v1.29.2.tar.gz"
+KUBE_SOURCE_DIR="$HOME/go/src/github.com/kubernetes/kubernetes"
+
 
 
 function create_usage() {
@@ -53,7 +56,7 @@ function validate_args() {
 main() {
   parse_flags "$@"
   validate_args
-  local GOOS GOARCH binaryAssetsDir kubeSchedulerBinaryUrl kubeSourceDir launchEnv
+  local GOOS GOARCH binaryAssetsDir kubeSchedulerBinaryUrl launchEnv kubeSchedulerGoMainFile
 
   GOOS=$(go env GOOS)
   GOARCH=$(go env GOARCH)
@@ -64,11 +67,37 @@ main() {
   printf "Executing: %s\n" "$envTestSetupCmd"
   binaryAssetsDir=$(eval "$envTestSetupCmd")
 
-  kubeSourceDir="$HOME/go/src/github.com/kubernetes/kubernetes"
-  if [[ ! -d "$kubeSourceDir" ]]; then
-    printf "Err: Kindly checkout kubernetes source into %s\n" "$kubeSourceDir" >&2
-    exit 1
+  if [[ ! -d "$KUBE_SOURCE_DIR" ]]; then
+    printf "No k8s sources at %s\n" "$KUBE_SOURCE_DIR"
+    pushd "/tmp" > /dev/null
+    printf "Downloading k8s source tarball from %s\n" "$K8S_SRC_TAR_URL"
+    curl -kL $K8S_SRC_TAR_URL -o /tmp/kubernetes.tar.gz
+    tar -zxf kubernetes.tar.gz
+    mv /tmp/kubernetes-1.29.2/ $KUBE_SOURCE_DIR
+    popd > /dev/null
+
+    pushd "$KUBE_SOURCE_DIR" > /dev/null
+    echo "Executing go mod tidy on $KUBE_SOURCE_DIR..."
+    go mod tidy
+    popd > /dev/null
   fi
+
+
+  kubeSchedulerGoMainFile="$KUBE_SOURCE_DIR/cmd/kube-scheduler/scheduler.go"
+  if [[ ! -f  $kubeSchedulerGoMainFile ]]; then
+    echo -e "No kube-scheduler Go main file at: $kubeSchedulerGoMainFile"
+    exit 2
+  fi
+
+  if [[ ! -f "$binaryAssetsDir/kube-scheduler" ]]; then
+    echo -e "No kube-scheduler binary in: $binaryAssetsDir"
+    echo "Building kube-scheduler"
+    pushd "$KUBE_SOURCE_DIR" > /dev/null
+    go build -v -o /tmp/kube-scheduler cmd/kube-scheduler/scheduler.go
+    cp -v /tmp/kube-scheduler "$binaryAssetsDir"
+    popd > /dev/null
+  fi
+
 
 #  kubeSchedulerBinaryUrl="https://dl.k8s.io/v1.29.1/bin/$GOOS/$GOARCH/kube-scheduler"
 #  chmod u+w "$binaryAssetsDir"
@@ -85,7 +114,8 @@ main() {
   printf "BINARY_ASSETS_DIR=\"%s\"
 GARDEN_SHOOT_NAME=\"%s\"
 GARDEN_PROJECT_NAME=\"%s\"
-GARDENCTL_KUBECONFIG=\"%s\"" "$binaryAssetsDir" "$SHOOT" "$PROJECT" "$KUBECONFIG" > "$LAUNCH_ENV_PATH"
+GARDENCTL_KUBECONFIG=\"%s\"
+KUBE_SOURCE_DIR=\"%s\"" "$binaryAssetsDir" "$SHOOT" "$PROJECT" "$KUBECONFIG" "$KUBE_SOURCE_DIR"> "$LAUNCH_ENV_PATH"
 
 
 

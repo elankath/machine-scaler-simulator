@@ -5,9 +5,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"k8s.io/client-go/kubernetes/scheme"
 
 	scalesim "github.com/elankath/scaler-simulator"
-	"github.com/elankath/scaler-simulator/gardenclient"
+	"github.com/elankath/scaler-simulator/virtualcluster"
 )
 
 func main() {
@@ -29,42 +32,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	shootAccess, err := gardenclient.InitShootAccess(gardenProjectName, gardenShootName)
+	virtualClusterAccess, err := virtualcluster.InitializeAccess(scheme.Scheme, binaryAssetsDir, map[string]string{
+		//		"secure-port": apiServerPort, <--TODO: this DOESN'T work..ask maddy on envtest port config
+	})
 	if err != nil {
-		slog.Error("cannot initialize shoot access", "error", err)
+		slog.Error("cannot initialize virtual cluster", "error", err)
 		os.Exit(2)
-		return
 	}
-	shootObj, err := shootAccess.GetShootObj()
-	if err != nil {
-		slog.Error("cannot get shoot obj", "project-name", gardenProjectName, "shoot-name", gardenShootName, "error", err)
-		os.Exit(3)
-		return
-	}
-	slog.Info("retrieved shoot obj.", "provider", shootObj.Spec.Provider.Type, "num-workerpool", len(shootObj.Spec.Provider.Workers))
-
-	shootNodes, err := shootAccess.GetNodes()
-	if err != nil {
-		slog.Error("cannot get shoot nodes", "project-name", gardenProjectName, "shoot-name", gardenShootName, "error", err)
-		os.Exit(4)
-		return
-	}
-	slog.Info("retrieved shoot nodes", "num-nodes", len(shootNodes))
-
-	// TODO: uncomment below lines. They are commented because otherwise there are complains that the var is not being used
-	// var model gardenclient.Model
-	// model = *gardenclient.Connect()
-
-	//virtualClusterAccess, err := virtualclient.InitializeAccess(scheme.Scheme, binaryAssetsDir, map[string]string{
-	//	//		"secure-port": apiServerPort, <--TODO: this DOESN'T work..ask maddy on envtest port config
-	//})
-	//if err != nil {
-	//	slog.Error("cannot initialize virtual cluster", "error", err)
-	//	os.Exit(2)
-	//}
-	//slog.Info("INITIALIZATION COMPLETE!")
-	//waitForSignalAndShutdown(virtualClusterAccess)
-	// wait the signal
+	time.Sleep(5 * time.Second)
+	slog.Info("INITIALIZATION COMPLETE!")
+	waitForSignalAndShutdown(virtualClusterAccess)
 }
 
 func waitForSignalAndShutdown(virtualAccess scalesim.VirtualClusterAccess) {

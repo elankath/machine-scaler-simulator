@@ -1,4 +1,4 @@
-package virtualclient
+package virtualcluster
 
 import (
 	"fmt"
@@ -64,17 +64,19 @@ func InitializeAccess(scheme *runtime.Scheme, binaryAssetsDir string, apiServerF
 	}
 	slog.Info("Wrote kubeconfig", "kubeconfig", kubeConfigPath)
 
-	//schedulerProcess, err := StartScheduler(binaryAssetsDir)
-	//if err != nil {
-	//	return nil, fmt.Errorf("error starting kube-scheduler: %w", err)
-	//}
-
-	return &access{
-		Client:      k8sClient,
-		RestConfig:  cfg,
-		Environment: habitatEnv,
-		//KubeSchedulerProcess: schedulerProcess,
-	}, nil
+	schedulerProcess, err := StartScheduler(binaryAssetsDir)
+	access := &access{
+		Client:               k8sClient,
+		RestConfig:           cfg,
+		Environment:          habitatEnv,
+		KubeSchedulerProcess: schedulerProcess,
+	}
+	if err != nil {
+		slog.Info("cannot start kube-scheduler.", "error", err)
+		_ = access.Shutdown()
+		return nil, err
+	}
+	return access, nil
 }
 
 func (a *access) Shutdown() (err error) {
@@ -88,7 +90,8 @@ func (a *access) Shutdown() (err error) {
 			return err
 		}
 		slog.Info("waiting for kube-scheduler to exit...", "signal", syscall.SIGTERM.String())
-		_, err = a.KubeSchedulerProcess.Wait()
+		procState, err := a.KubeSchedulerProcess.Wait()
+		slog.Info("kube-scheduler done", "exited", procState.Exited(), "exit-success", procState.Success(), "exit-code", procState.ExitCode())
 		return err
 	}
 	return
@@ -128,14 +131,17 @@ func CreateKubeconfigFileForRestConfig(restConfig rest.Config) error {
 }
 
 func StartScheduler(binaryAssetsDir string) (*os.Process, error) {
-	kubeSchedulerPath := fmt.Sprintf("%s/kube-scheduler", binaryAssetsDir)
-	command := exec.Command(kubeSchedulerPath, "--kubeconfig", kubeConfigPath)
+	//wd, err := os.Getwd()
+	//if err != nil {
+	//	return nil, fmt.Errorf("cannot get working dir: %w", err)
+	//}
+	command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath, "--leader-elect=false")
 	command.Stderr = os.Stderr
 	command.Stdout = os.Stdout
 	slog.Info("launching kube-scheduler", "command", command)
 	err := command.Start()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cannot start kube-scheduler: %w", err)
 	}
 	return command.Process, nil
 }
