@@ -180,16 +180,3 @@ in case there is no assigned node.
   - in order to be computationally feasible we need the
 node priiority scores from the scheduler.
 
-
-
-### TODO
-- make `types.go`
-- make a `simulator.ShootClusterModel`
-- make an interface type `simulator.`
-- rename `Access` to `ShadowCluster`
-- make a package `scheduler` which has a `NewSchedulerAccess`
-- and an interface `SchedulerAccess`
-- name `habitat` to `bootstrap`
-- rename `habitat.InitHabitat` to `bootstrap.InitShadowCluster`
-with 2 implementations: `in-proces` `out-process
-- make a method on `ConrolePlane`
