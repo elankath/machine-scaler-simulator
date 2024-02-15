@@ -25,6 +25,12 @@ type VirtualClusterAccess interface {
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster
 type ShootAccess interface {
+	// ProjectName returns the project name that the shoot belongs to
+	ProjectName() string
+
+	// ShootName returns the name of the shoot
+	ShootName() string
+
 	// GetShootObj returns the shoot object describing the shoot cluster
 	GetShootObj() (*gardencore.Shoot, error)
 

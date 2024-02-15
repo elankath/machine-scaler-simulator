@@ -31,6 +31,14 @@ type shootAccess struct {
 	//nodeList []corev1.Node
 }
 
+func (s *shootAccess) ProjectName() string {
+	return s.projectName
+}
+
+func (s *shootAccess) ShootName() string {
+	return s.shootName
+}
+
 var (
 	codec runtime.Codec
 )
