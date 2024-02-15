@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  generateName: tringo-
+  generateName: bingo-
   namespace: default
   labels: {}
 spec:
@@ -19,7 +19,7 @@ spec:
       terminationMessagePolicy: File
       imagePullPolicy: IfNotPresent
   restartPolicy: Always
-  terminationGracePeriodSeconds: 30
+  terminationGracePeriodSeconds: 0
   dnsPolicy: ClusterFirst
   securityContext: {}
   enableServiceLinks: true

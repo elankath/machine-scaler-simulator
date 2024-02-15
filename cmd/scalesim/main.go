@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -43,7 +44,7 @@ func main() {
 		os.Exit(2)
 		return
 	}
-	validateShootAccess(shootAccess)
+	//validateShootAccess(shootAccess)
 
 	virtualClusterAccess, err := virtualcluster.InitializeAccess(scheme.Scheme, binaryAssetsDir, map[string]string{
 		//		"secure-port": apiServerPort, <--TODO: this DOESN'T work..ask maddy on envtest port config
@@ -69,9 +70,9 @@ func main() {
 
 	go waitForSignalAndShutdown(virtualClusterAccess, httpServer)
 
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("service cannot listen/serve, SHUTTING DOWN.", "error", err)
-		err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+		err := syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 		if err != nil {
 			slog.Error("cannot term self!", "error", err)
 		}
@@ -104,15 +105,9 @@ func waitForSignalAndShutdown(virtualAccess scalesim.VirtualClusterAccess, httpS
 	signal.Notify(quit, syscall.SIGTERM, os.Interrupt)
 	s := <-quit
 	slog.Warn("Cleanup and Exit!", "signal", s.String())
+	virtualAccess.Shutdown()
 
 	if err := httpServer.Shutdown(context.Background()); err != nil {
 		slog.Error("cannot shut down http service", "error", err)
 	}
-
-	err := virtualAccess.Shutdown()
-	if err != nil {
-		slog.Warn("error in shutdown", "error", err)
-		os.Exit(10)
-	}
-
 }

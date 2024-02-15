@@ -75,28 +75,38 @@ func InitializeAccess(scheme *runtime.Scheme, binaryAssetsDir string, apiServerF
 	}
 	if err != nil {
 		slog.Info("cannot start kube-scheduler.", "error", err)
-		_ = access.Shutdown()
+		access.Shutdown()
 		return nil, err
 	}
 	return access, nil
 }
 
-func (a *access) Shutdown() (err error) {
-	err = a.environment.Stop()
-	if err != nil {
-		return err
-	}
+func (a *access) Shutdown() {
+	slog.Info("STOPPING env test apiserver,etcd")
+	err := a.environment.Stop()
+	slog.Warn("error stopping envtest.", "error", err)
 	if a.kubeSchedulerProcess != nil { //TODO: launch kube-scheduler as part of simulator.
 		err = a.kubeSchedulerProcess.Signal(syscall.SIGTERM)
 		if err != nil {
-			return err
+			slog.Warn("error signalling kubescheduler process.", "error", err)
 		}
 		slog.Info("waiting for kube-scheduler to exit...", "signal", syscall.SIGTERM.String())
 		procState, err := a.kubeSchedulerProcess.Wait()
-		slog.Info("kube-scheduler done", "exited", procState.Exited(), "exit-success", procState.Success(), "exit-code", procState.ExitCode())
-		return err
+		slog.Info("kube-scheduler done", "exited", procState.Exited(), "exit-success", procState.Success(), "exit-code", procState.ExitCode(), "error", err)
 	}
 	return
+}
+
+func (a *access) AddNodes(ctx context.Context, nodes []corev1.Node) error {
+	for _, n := range nodes {
+		n.ObjectMeta.ResourceVersion = ""
+		n.ObjectMeta.UID = ""
+		err := a.client.Create(ctx, &n)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *access) ClearAll(ctx context.Context) (err error) {
@@ -179,7 +189,8 @@ func createKubeconfigFileForRestConfig(restConfig rest.Config) error {
 }
 
 func StartScheduler(binaryAssetsDir string) (*os.Process, error) {
-	command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath, "--leader-elect=false")
+	command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath, "--leader-elect=false", "-v=3")
+	//command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath)
 	command.Stderr = os.Stderr
 	command.Stdout = os.Stdout
 	slog.Info("launching kube-scheduler", "command", command)

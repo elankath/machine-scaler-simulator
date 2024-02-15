@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 PROJECT_DIR="$(cd "$(dirname "${SCRIPT_DIR}")" &>/dev/null && pwd)"
 LAUNCH_ENV_FILE="launch.env"
 LAUNCH_ENV_PATH="$PROJECT_DIR/$LAUNCH_ENV_FILE"
-K8S_SRC_TAR_URL="https://github.com/kubernetes/kubernetes/archive/refs/tags/v1.29.2.tar.gz"
+K8S_SRC_TAR_URL="https://github.com/kubernetes/kubernetes/archive/refs/tags/v1.29.1.tar.gz"
 KUBE_SOURCE_DIR="$HOME/go/src/github.com/kubernetes/kubernetes"
 
 
@@ -83,13 +83,13 @@ main() {
     printf "Downloading k8s source tarball from %s\n" "$K8S_SRC_TAR_URL"
     curl -kL $K8S_SRC_TAR_URL -o /tmp/kubernetes.tar.gz
     tar -zxf kubernetes.tar.gz
-    mv /tmp/kubernetes-1.29.2/ $KUBE_SOURCE_DIR
+    mv /tmp/kubernetes-1.29.1/ $KUBE_SOURCE_DIR
     popd > /dev/null
 
-    pushd "$KUBE_SOURCE_DIR" > /dev/null
-    echo "Executing go mod tidy on $KUBE_SOURCE_DIR..."
-    go mod tidy
-    popd > /dev/null
+#    pushd "$KUBE_SOURCE_DIR" > /dev/null
+#    echo "Executing go mod tidy on $KUBE_SOURCE_DIR..."
+#    go mod tidy
+#    popd > /dev/null
   fi
 
 
@@ -130,7 +130,11 @@ KUBE_SOURCE_DIR=\"%s\"" "$binaryAssetsDir" "$SHOOT" "$PROJECT" "$KUBECONFIG" "$K
 
 
   printf "Wrote env to %s\n" "$LAUNCH_ENV_PATH"
+
+  echo
+  echo "NOTE: COPY & EXECUTE THIS->> set -o allexport && source launch.env && set +o allexport"
 }
+
 
 USAGE=$(create_usage)
 main "$@"

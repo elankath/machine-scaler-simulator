@@ -18,8 +18,8 @@ type VirtualClusterAccess interface {
 	// KubeConfigPath gets path to the kubeconfig.yaml file that can be used by kubectl to connect to this vitual cluster
 	KubeConfigPath() string
 
-	//TODO: AddNodes
-	//TODO: AddPods
+	// AddNodes adds the given slice of k8s Nodes to the virtual cluster
+	AddNodes(ctx context.Context, nodes []corev1.Node) error
 
 	// ClearAll clears all k8s objects from the virtual cluster.
 	ClearAll(ctx context.Context) error
@@ -30,8 +30,8 @@ type VirtualClusterAccess interface {
 	// ClearPods clears all nodes from the virtual cluster
 	ClearPods(ctx context.Context) error
 
-	// Shutdown shuts down all components of the virtualcluster cluster. Returns err encountered during shutdown if any.
-	Shutdown() error
+	// Shutdown shuts down all components of the virtualcluster cluster. Log all errors encountered during shutdown
+	Shutdown()
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster
