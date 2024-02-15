@@ -104,6 +104,7 @@ main() {
     echo "Building kube-scheduler"
     pushd "$KUBE_SOURCE_DIR" > /dev/null
     go build -v -o /tmp/kube-scheduler cmd/kube-scheduler/scheduler.go
+    chmod +w "$binaryAssetsDir"
     cp -v /tmp/kube-scheduler "$binaryAssetsDir"
     popd > /dev/null
   fi

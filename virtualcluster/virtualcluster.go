@@ -8,8 +8,11 @@ import (
 	"os/exec"
 	"syscall"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -17,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	scalesim "github.com/elankath/scaler-simulator"
+	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
 )
 
 var kubeConfigPath = "/tmp/scalesim-kubeconfig.yaml"
@@ -107,6 +111,101 @@ func (a *access) AddNodes(ctx context.Context, nodes []corev1.Node) error {
 		}
 	}
 	return nil
+}
+
+func (a *access) RemoveTaintFromNode(ctx context.Context) error {
+	nodeList := corev1.NodeList{}
+	if err := a.client.List(ctx, &nodeList); err != nil {
+		slog.Error("error listing nodes", "error", err)
+		return err
+	}
+
+	for _, no := range nodeList.Items {
+		node := corev1.Node{}
+		if err := a.client.Get(ctx, client.ObjectKeyFromObject(&no), &node); err != nil {
+			return err
+		}
+		patch := client.MergeFrom(node.DeepCopy())
+		node.Spec.Taints = nil
+
+		if err := a.client.Patch(ctx, &node, patch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *access) GetFailedSchedulingEvents(ctx context.Context) ([]corev1.Event, error) {
+	var FailedSchedulingEvents []corev1.Event
+
+	eventList := corev1.EventList{}
+	if err := a.client.List(ctx, &eventList); err != nil {
+		slog.Error("error listing nodes", "error", err)
+		return nil, err
+	}
+	for _, event := range eventList.Items {
+		if event.Reason == "FailedScheduling" { //TODO: find if there a constant for 'FailedScheduling'
+			pod := corev1.Pod{}
+			if err := a.client.Get(ctx, types.NamespacedName{Name: event.InvolvedObject.Name, Namespace: event.InvolvedObject.Namespace}, &pod); err != nil {
+				return nil, err
+			}
+			// TODO:(verify with others) have to do have this check since the 'FailedScheduling' events are not deleted
+			if pod.Spec.NodeName != "" {
+				continue
+			}
+			FailedSchedulingEvents = append(FailedSchedulingEvents, event)
+		}
+	}
+	return FailedSchedulingEvents, nil
+}
+
+func (a *access) ApplyK8sObject(ctx context.Context, k8sObjs []runtime.Object) error {
+	for _, obj := range k8sObjs {
+		switch obj.(type) { //TODO: add more cases here as and when needed
+		case *corev1.Pod:
+			pod := obj.(*corev1.Pod)
+			pod.ObjectMeta.ResourceVersion = ""
+			pod.ObjectMeta.UID = ""
+			err := a.client.Create(ctx, pod)
+			if err != nil {
+				return err
+			}
+		case *appsv1.Deployment:
+			deploy := obj.(*appsv1.Deployment)
+			err := a.client.Create(ctx, deploy)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (a *access) CreateNodeInWorkerGroup(ctx context.Context, wg *v1beta1.Worker) (bool, error) {
+	//Need an already existing node for node.Status.Allocatable and node.Status.Capacity
+	nodeList := corev1.NodeList{}
+	if err := a.client.List(ctx, &nodeList); err != nil {
+		return false, err
+	}
+	if int32(len(nodeList.Items)) >= wg.Maximum {
+		return false, nil
+	}
+
+	deployedNode := nodeList.Items[0].DeepCopy()
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "new-node-",
+			Namespace:    "default",
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: deployedNode.Status.Allocatable,
+			Capacity:    deployedNode.Status.Capacity,
+		},
+	}
+	if err := a.client.Create(ctx, &node); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (a *access) ClearAll(ctx context.Context) (err error) {

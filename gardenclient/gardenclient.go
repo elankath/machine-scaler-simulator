@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strings"
 
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -75,6 +76,30 @@ func InitShootAccess(projectName, shootName string) (scalesim.ShootAccess, error
 		getNodesCmd: getNodesCmd,
 		codec:       codec,
 	}, nil
+}
+
+func (s *shootAccess) ConstructK8sObject(path string) ([]runtime.Object, error) {
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	stringFromBytes := string(bytes)
+
+	var ObjectList []runtime.Object
+	for _, podSpec := range strings.Split(stringFromBytes, "---") {
+		if len(podSpec) == 0 {
+			continue
+		}
+		obj, err := runtime.Decode(s.codec, []byte(podSpec))
+		if err != nil {
+			slog.Error("cannot decode object", "error", err)
+			return nil, err
+		}
+		ObjectList = append(ObjectList, obj)
+	}
+
+	return ObjectList, nil
 }
 
 func (s *shootAccess) GetShootObj() (*gardencore.Shoot, error) {

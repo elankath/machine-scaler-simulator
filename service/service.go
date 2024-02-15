@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	scalesim "github.com/elankath/scaler-simulator"
+	"github.com/elankath/scaler-simulator/scenarios"
 )
 
 type engine struct {
@@ -30,10 +31,26 @@ func (e *engine) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
 	e.mux.ServeHTTP(writer, request)
 }
 
+func (e *engine) VirtualClusterAccess() scalesim.VirtualClusterAccess {
+	return e.virtualAccess
+}
+
+func (e *engine) ShootAccess() scalesim.ShootAccess {
+	return e.shootAccess
+}
+
 func addRoutes(mux *http.ServeMux, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess) {
 	mux.Handle("DELETE /api/virtual-cluster", handleClearVirtualCluster(virtualAccess))
 	mux.Handle("POST /api/sync-shoot-nodes", handleSyncShootNodes(virtualAccess, shootAccess))
-	//mux.Handle("GET /api/bingo", http.HandleFunc())
+	mux.HandleFunc("POST /scenario/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		fmt.Fprintf(w, "handling scenario with id=%v\n", id)
+
+		switch id {
+		case "A":
+			scenarios.NewScenarioA(r.Context(), virtualAccess, shootAccess, w)
+		}
+	})
 }
 
 func handleSyncShootNodes(virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess) http.Handler {

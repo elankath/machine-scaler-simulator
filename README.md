@@ -14,7 +14,7 @@ Scaling Simulator that determines which garden worker pool must be scaled to hos
    1. `set -o allexport && source launch.env && set +o allexport`
 1. Run the simulation server: `go run cmd/scalesim/main.go`
 1. The `KUBECONFIG` for simulated control plane should be generated at `/tmp/scalesim-kubeconfig.yaml`
-   1. `export KUBECONFIG=/tmp/simulation-kubeconfig.yaml`
+   1. `export KUBECONFIG=/tmp/scalesim-kubeconfig.yaml`
    1. `kubectl get ns`
 
 
