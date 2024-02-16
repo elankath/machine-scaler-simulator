@@ -70,7 +70,7 @@ graph LR
 
 ### Simulation Scenarios
 
-#### Scenario: Simple Scale from zero
+#### Scenario: Simple Scale-from-zero
 
 We have two worker groups with min=1, max=1 with machine types: `m5.large`, `m5.2xlarge` respectively.
 
