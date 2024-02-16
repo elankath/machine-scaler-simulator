@@ -32,6 +32,17 @@ type access struct {
 	kubeSchedulerProcess *os.Process
 }
 
+func (a *access) CreatePods(ctx context.Context, pods ...corev1.Pod) error {
+	for _, pod := range pods {
+		err := a.client.Create(ctx, &pod)
+		if err != nil {
+			slog.Error("Error creating the pod.", "error", err)
+			return err
+		}
+	}
+	return nil
+}
+
 var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implements I.
 
 func (a *access) KubeConfigPath() string {
@@ -191,11 +202,21 @@ func (a *access) CreateNodeInWorkerGroup(ctx context.Context, wg *v1beta1.Worker
 		return false, nil
 	}
 
-	deployedNode := nodeList.Items[0].DeepCopy()
+	var deployedNode *corev1.Node
+	for _, node := range nodeList.Items {
+		if node.Labels["worker.garden.sapcloud.io/group"] == wg.Name {
+			deployedNode = &node
+		}
+	}
+	if deployedNode == nil {
+		return false, nil
+	}
 	node := corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "new-node-",
+			GenerateName: fmt.Sprintf("wg-%s-", wg.Name),
 			Namespace:    "default",
+			//TODO Change k8s hostname labels
+			Labels: deployedNode.Labels,
 		},
 		Status: corev1.NodeStatus{
 			Allocatable: deployedNode.Status.Allocatable,
