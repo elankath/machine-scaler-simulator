@@ -3,6 +3,7 @@ package scenarios
 import (
 	"context"
 	"fmt"
+	"github.com/elankath/scaler-simulator/utils"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,7 +19,7 @@ import (
 // One worker pool, min=1, max=2
 // 1 node up
 // Add multiple pods. Should assign some pods to the running node, and recommand scaling up a node for the remaining
-func NewScenarioA(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter) {
+func NewScenarioA(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter, podsCount int) {
 	fmt.Fprintln(w, "Executing scenario A")
 
 	SyncNodesInShoot(ctx, virtualAccess, shootAccess, w)
@@ -32,10 +33,13 @@ func NewScenarioA(ctx context.Context, virtualAccess scalesim.VirtualClusterAcce
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	err = virtualAccess.ApplyK8sObject(ctx, objects)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+
+	for i := 0; i < podsCount; i++ {
+		err = virtualAccess.ApplyK8sObject(ctx, objects)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 
 	slog.Log(ctx, slog.LevelInfo, "Waiting for 15 seconds to give scheduler some breathing space")
@@ -79,6 +83,157 @@ func NewScenarioA(ctx context.Context, virtualAccess scalesim.VirtualClusterAcce
 	}
 	slog.Log(ctx, slog.LevelInfo, "No unscheduled pods present. Finishing scenario A", "num-nodes-created", TotalNodesCreated)
 	fmt.Fprintln(w, "Done Execution of scenario A")
+}
+
+func NewScenarioB(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter, podsCount int) {
+	utils.LogEvent(w, "Executing scenario B")
+
+	SyncNodesInShoot(ctx, virtualAccess, shootAccess, w)
+	if err := virtualAccess.RemoveTaintFromNode(ctx); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	pod, err := shootAccess.ConstructPod(GetYamlFilePath("scenarioB_pods.yaml"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for i := 0; i < podsCount; i++ {
+		slog.Info("Creating pod", "pod", pod.Name, "namespace", pod.Namespace)
+		err = virtualAccess.CreatePods(ctx, pod)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	slog.Log(ctx, slog.LevelInfo, "Waiting for 15 seconds to give scheduler some breathing space")
+	<-time.After(15 * time.Second)
+
+	TotalNodesCreated := 0
+	shoot, err := shootAccess.GetShootObj()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for {
+		eventList, err := virtualAccess.GetFailedSchedulingEvents(ctx)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(eventList) == 0 {
+			slog.Log(ctx, slog.LevelInfo, "No FailedScheduling events present, exiting...")
+			break
+		}
+		slog.Log(ctx, slog.LevelInfo, "Unscheduled pods present. Creating a new node to schedule these pods", "num-pending-pods", len(eventList))
+
+		nodeCreated, err := virtualAccess.CreateNodeInWorkerGroup(ctx, &shoot.Spec.Provider.Workers[0])
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !nodeCreated {
+			slog.Log(ctx, slog.LevelError, "error creating node. Node could not be created. WorkerGroup max reached")
+			break
+		}
+		if err := virtualAccess.RemoveTaintFromNode(ctx); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		TotalNodesCreated = TotalNodesCreated + 1
+
+		slog.Log(ctx, slog.LevelInfo, "Node created. Waiting for 15 seconds and retrying...")
+		<-time.After(15 * time.Second)
+	}
+	slog.Log(ctx, slog.LevelInfo, "No unscheduled pods present. Finishing scenario A", "num-nodes-created", TotalNodesCreated)
+	utils.LogEvent(w, "Done Execution of scenario B")
+}
+
+func NewScenarioC(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter, podsACount, podsBCount int) {
+	utils.LogEvent(w, "Executing scenario C")
+
+	SyncNodesInShoot(ctx, virtualAccess, shootAccess, w)
+	if err := virtualAccess.RemoveTaintFromNode(ctx); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	podA, err := shootAccess.ConstructPod(GetYamlFilePath("scenarioC_podA.yaml"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	podB, err := shootAccess.ConstructPod(GetYamlFilePath("scenarioC_podB.yaml"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	for i := 0; i < podsACount; i++ {
+		slog.Info("Creating pod", "pod", podA.Name, "namespace", podA.Namespace)
+		err := virtualAccess.CreatePods(ctx, podA)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	for i := 0; i < podsBCount; i++ {
+		slog.Info("Creating pod", "pod", podA.Name, "namespace", podB.Namespace)
+		err := virtualAccess.CreatePods(ctx, podB)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	slog.Log(ctx, slog.LevelInfo, "Waiting for 15 seconds to give scheduler some breathing space")
+	<-time.After(15 * time.Second)
+
+	TotalNodesCreated := 0
+	shoot, err := shootAccess.GetShootObj()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for {
+		eventList, err := virtualAccess.GetFailedSchedulingEvents(ctx)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(eventList) == 0 {
+			slog.Log(ctx, slog.LevelInfo, "No FailedScheduling events present, exiting...")
+			break
+		}
+		slog.Log(ctx, slog.LevelInfo, "Unscheduled pods present. Creating a new node to schedule these pods", "num-pending-pods", len(eventList))
+
+		for _, worker := range shoot.Spec.Provider.Workers {
+			nodeCreated, err := virtualAccess.CreateNodeInWorkerGroup(ctx, &worker)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if !nodeCreated {
+				slog.Log(ctx, slog.LevelError, "error creating node. Node could not be created. WorkerGroup max reached")
+				break
+			}
+			if err := virtualAccess.RemoveTaintFromNode(ctx); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			TotalNodesCreated = TotalNodesCreated + 1
+
+			slog.Log(ctx, slog.LevelInfo, "Node created. Waiting for 15 seconds and retrying...")
+			<-time.After(15 * time.Second)
+		}
+	}
+	slog.Log(ctx, slog.LevelInfo, "No unscheduled pods present. Finishing scenario C", "num-nodes-created", TotalNodesCreated)
+	utils.LogEvent(w, "Done Execution of scenario C")
 }
 
 func SyncNodesInShoot(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter) {

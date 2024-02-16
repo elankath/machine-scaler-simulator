@@ -102,6 +102,23 @@ func (s *shootAccess) ConstructK8sObject(path string) ([]runtime.Object, error) 
 	return ObjectList, nil
 }
 
+func (s *shootAccess) ConstructPod(path string) (corev1.Pod, error) {
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		return corev1.Pod{}, err
+	}
+
+	pod := corev1.Pod{}
+	obj, err := runtime.Decode(s.codec, bytes)
+	if err != nil {
+		slog.Error("cannot decode object", "error", err)
+		return corev1.Pod{}, err
+	}
+	pod = *(obj.(*corev1.Pod))
+
+	return pod, nil
+}
+
 func (s *shootAccess) GetShootObj() (*gardencore.Shoot, error) {
 	slog.Info("shootAccess.GetShootObj().", "command", s.getShootCmd.String())
 	cmdOutput, err := s.getShootCmd.Output()

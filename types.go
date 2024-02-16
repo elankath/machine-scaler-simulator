@@ -31,6 +31,9 @@ type VirtualClusterAccess interface {
 	// RemoveTaintFromNode removed the NoSchedule taint from all nodes in the virtual cluster
 	RemoveTaintFromNode(context.Context) error
 
+	// CreatePods creates the given slice of k8s Pods in the virtual cluster
+	CreatePods(context.Context, ...corev1.Pod) error
+
 	// ApplyK8sObject applies all Objects into the virtual cluster
 	ApplyK8sObject(context.Context, []runtime.Object) error
 
@@ -69,6 +72,8 @@ type ShootAccess interface {
 
 	// ConstructK8sObject reads a yaml file containing k8s resources and creates objects
 	ConstructK8sObject(path string) ([]runtime.Object, error)
+
+	ConstructPod(path string) (corev1.Pod, error)
 }
 
 type Scenarios interface {
