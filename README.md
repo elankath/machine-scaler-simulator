@@ -37,7 +37,6 @@ Scaling Simulator that determines which garden worker pool must be scaled to hos
 #### Clear Virtual Cluster
 
 `curl -XDELETE localhost:8080/op/virtual-cluster`
-`curl -XDELE localhost:8080/scenarios/A`
 
 ### Scenario Commands
 
