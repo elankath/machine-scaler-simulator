@@ -33,7 +33,7 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, err)
 		return
 	}
-	podCount := webutil.GetIntQueryParam(r, "podCount", 3)
+	podCount := webutil.GetIntQueryParam(r, "podCount", 4)
 	podSpecPath := "scenarios/a/pod.yaml"
 	waitSecs := 15
 	webutil.Log(w, fmt.Sprintf("Applying %d replicas of pod spec: %s and waiting for: %d secs", podCount, podSpecPath, waitSecs))

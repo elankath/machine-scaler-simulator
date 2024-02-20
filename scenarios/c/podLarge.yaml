@@ -1,17 +1,18 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  generateName: scenario-a-
+  generateName: scenario-c-large-
   namespace: default
   labels: {}
 spec:
+  schedulerName: bin-packing-scheduler
   containers:
     - name: pause
       image: registry.k8s.io/pause:3.5
       resources:
         requests:
           cpu: 100m
-          memory: 2Gi
+          memory: 7Gi
       terminationMessagePath: /dev/termination-log
       terminationMessagePolicy: File
       imagePullPolicy: IfNotPresent

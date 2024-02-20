@@ -19,6 +19,7 @@ type Engine interface {
 	SyncNodes(ctx context.Context, shootName string) error
 	ApplyPod(ctx context.Context, podSpecPath string, replicas int, waitSecs int) error
 	ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
+	ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
 }
 
 // VirtualClusterAccess represents access to the virtualcluster cluster managed by the simulator that shadows the real cluster
@@ -44,6 +45,9 @@ type VirtualClusterAccess interface {
 	// CreateNodeInWorkerGroup creates a sample node if the passed workerGroup objects max has not been met
 	CreateNodeInWorkerGroup(context.Context, *v1beta1.Worker) (bool, error)
 
+	// CreateNodesTillMax creates sample nodes in the given worker pool till the worker pool max is reached.
+	CreateNodesTillMax(context.Context, *v1beta1.Worker) error
+
 	// ClearAll clears all k8s objects from the virtual cluster.
 	ClearAll(ctx context.Context) error
 
@@ -55,6 +59,10 @@ type VirtualClusterAccess interface {
 
 	// Shutdown shuts down all components of the virtualcluster cluster. Log all errors encountered during shutdown
 	Shutdown()
+
+	ListNodes(ctx context.Context) ([]corev1.Node, error)
+
+	ListPods(ctx context.Context) ([]corev1.Pod, error)
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster

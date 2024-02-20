@@ -125,6 +125,24 @@ func (a *access) AddNodes(ctx context.Context, nodes []corev1.Node) error {
 	return nil
 }
 
+func (a *access) ListNodes(ctx context.Context) ([]corev1.Node, error) {
+	nodeList := corev1.NodeList{}
+	if err := a.client.List(ctx, &nodeList); err != nil {
+		slog.Error("cannot list nodes", "error", err)
+		return nil, err
+	}
+	return nodeList.Items, nil
+}
+
+func (a *access) ListPods(ctx context.Context) ([]corev1.Pod, error) {
+	podList := corev1.PodList{}
+	if err := a.client.List(ctx, &podList); err != nil {
+		slog.Error("cannot list nodes", "error", err)
+		return nil, err
+	}
+	return podList.Items, nil
+}
+
 func (a *access) RemoveTaintFromNode(ctx context.Context) error {
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList); err != nil {
@@ -193,13 +211,34 @@ func (a *access) ApplyK8sObject(ctx context.Context, k8sObjs ...runtime.Object) 
 	return nil
 }
 
+func (a *access) CreateNodesTillMax(ctx context.Context, wg *v1beta1.Worker) error {
+	for i := int32(0); i < wg.Maximum; i++ {
+		created, err := a.CreateNodeInWorkerGroup(ctx, wg)
+		if err != nil {
+			return err
+		}
+		if !created {
+			break
+		}
+	}
+	return nil
+}
+
 func (a *access) CreateNodeInWorkerGroup(ctx context.Context, wg *v1beta1.Worker) (bool, error) {
 	//Need an already existing node for node.Status.Allocatable and node.Status.Capacity
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList); err != nil {
 		return false, err
 	}
-	if int32(len(nodeList.Items)) >= wg.Maximum {
+
+	var wgNodes []corev1.Node
+	for _, n := range nodeList.Items {
+		if n.Labels["worker.garden.sapcloud.io/group"] == wg.Name {
+			wgNodes = append(wgNodes, n)
+		}
+	}
+
+	if int32(len(wgNodes)) >= wg.Maximum {
 		return false, nil
 	}
 
@@ -310,7 +349,9 @@ func createKubeconfigFileForRestConfig(restConfig rest.Config) error {
 }
 
 func StartScheduler(binaryAssetsDir string) (*os.Process, error) {
-	command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath, "--leader-elect=false", "-v=3")
+	workingDir, _ := os.Getwd()
+	schedulerConfigPath := workingDir + "/virtualcluster/scheduler-config.yaml"
+	command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath, "--config", schedulerConfigPath, "--leader-elect=false", "-v=3")
 	//command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath)
 	command.Stderr = os.Stderr
 	command.Stdout = os.Stdout

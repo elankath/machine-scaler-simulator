@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
@@ -14,11 +13,11 @@ import (
 
 	"github.com/elankath/scaler-simulator/gardenclient"
 	"github.com/elankath/scaler-simulator/scenarios/a"
+	"github.com/elankath/scaler-simulator/scenarios/c"
 	"github.com/elankath/scaler-simulator/serutil"
 	"github.com/elankath/scaler-simulator/webutil"
 
 	scalesim "github.com/elankath/scaler-simulator"
-	"github.com/elankath/scaler-simulator/scenarios"
 )
 
 type engine struct {
@@ -71,29 +70,31 @@ func (e *engine) addRoutes() {
 	scenarioA := a.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioA.Name(), scenarioA)
 
-	//e.mux.Handle("POST /scenarios/C", handleScenarioC(virtualAccess, shootAccess))
+	scenarioC := c.New(e)
+	e.mux.Handle("POST /scenarios/"+scenarioC.Name(), scenarioC)
+
 }
 
-func handleScenarioC(virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		webutil.SetupSSEWriter(w)
-		podCountAstr := r.URL.Query().Get("podCountA")
-		podCountBstr := r.URL.Query().Get("podCountB")
-		podCountA, err := strconv.Atoi(podCountAstr)
-		if err != nil {
-			slog.Error("Error converting podCountA to int", "error", err)
-			return
-		}
-		podCountB, err := strconv.Atoi(podCountBstr)
-		if err != nil {
-			slog.Error("Error converting podCountB to int", "error", err)
-			return
-		}
-		webutil.Log(w, fmt.Sprintf("handling scenario C\n"))
-
-		scenarios.NewScenarioC(r.Context(), virtualAccess, shootAccess, w, podCountA, podCountB)
-	})
-}
+//func handleScenarioC(virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess) http.Handler {
+//	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//		webutil.SetupSSEWriter(w)
+//		podCountAstr := r.URL.Query().Get("podCountA")
+//		podCountBstr := r.URL.Query().Get("podCountB")
+//		podCountA, err := strconv.Atoi(podCountAstr)
+//		if err != nil {
+//			slog.Error("Error converting podCountA to int", "error", err)
+//			return
+//		}
+//		podCountB, err := strconv.Atoi(podCountBstr)
+//		if err != nil {
+//			slog.Error("Error converting podCountB to int", "error", err)
+//			return
+//		}
+//		webutil.Log(w, fmt.Sprintf("handling scenario C\n"))
+//
+//		scenarios.NewScenarioC(r.Context(), virtualAccess, shootAccess, w, podCountA, podCountB)
+//	})
+//}
 
 func (e *engine) handleSyncShootNodes() http.Handler {
 	return http.HandlerFunc(
@@ -144,7 +145,7 @@ func (e *engine) handleClearVirtualCluster() http.Handler {
 }
 
 func (e *engine) ApplyPod(ctx context.Context, podSpecPath string, replicas int, waitSecs int) error {
-	pod, err := serutil.ReadPod("scenarios/a/pod.yaml")
+	pod, err := serutil.ReadPod(podSpecPath)
 	if err != nil {
 		return fmt.Errorf("cannot read pod spec %q: %w", podSpecPath, err)
 	}
@@ -154,7 +155,6 @@ func (e *engine) ApplyPod(ctx context.Context, podSpecPath string, replicas int,
 			return fmt.Errorf("cannot create replica %d of pod spec %q: %w", i, podSpecPath, err)
 		}
 	}
-	<-time.After(15 * time.Second)
 	return nil
 }
 
@@ -172,16 +172,16 @@ func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context,
 			break
 		}
 		slog.Log(ctx, slog.LevelInfo, "Unscheduled pods present. Creating a new node to schedule these pods", "num-pending-pods", len(eventList))
-		_, _ = fmt.Fprintf(w, "%d Unscheduled pods present. Creating a new node to schedule these pods", len(eventList))
+		webutil.Log(w, fmt.Sprintf("%d Unscheduled pods present. Creating a new node to schedule these pods", len(eventList)))
 
-		for _, worker := range shoot.Spec.Provider.Workers {
-			nodeCreated, err := e.virtualAccess.CreateNodeInWorkerGroup(ctx, &worker)
+		for _, pool := range shoot.Spec.Provider.Workers {
+			nodeCreated, err := e.virtualAccess.CreateNodeInWorkerGroup(ctx, &pool)
 			if err != nil {
 				webutil.InternalError(w, err)
 				return totalNodesCreated, err
 			}
 			if !nodeCreated {
-				err = errors.New("node could not be created - worker pool max reached")
+				err = errors.New("node could not be created - pool pool max reached")
 				slog.Error("error creating node. ", "error", err)
 				webutil.InternalError(w, err)
 				return totalNodesCreated, err
@@ -191,10 +191,29 @@ func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context,
 				return totalNodesCreated, err
 			}
 			totalNodesCreated += 1
-			slog.Log(ctx, slog.LevelInfo, "Node created. Waiting and retrying.", "waitSecs", waitSecs)
 		}
-		<-time.After(5 * time.Second)
+		slog.Log(ctx, slog.LevelInfo, "+1 Nodes of worker pools created. Waiting and retrying.", "waitSecs", waitSecs)
+		<-time.After(10 * time.Second)
 	}
 	slog.Log(ctx, slog.LevelInfo, "No unscheduled pods present.", "scenario", scenarioName, "num-nodes-created", totalNodesCreated)
+	webutil.Log(w, "No Unscheduled pods present for scenario: "+scenarioName)
+	return totalNodesCreated, nil
+}
+
+func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
+	webutil.Log(w, "Scaling worker pools til max for scenario: "+scenarioName)
+	totalNodesCreated := 0
+	for _, pool := range shoot.Spec.Provider.Workers {
+		//e.virtualAccess.ListNodes(ctx)
+		err := e.virtualAccess.CreateNodesTillMax(ctx, &pool)
+		if err != nil {
+			return totalNodesCreated, err
+		}
+		webutil.Log(w, fmt.Sprintf("Created nodes in pool %q till max %d", pool.Name, pool.Maximum))
+		if err := e.virtualAccess.RemoveTaintFromNode(ctx); err != nil {
+			return totalNodesCreated, err
+		}
+		totalNodesCreated += int(pool.Maximum)
+	}
 	return totalNodesCreated, nil
 }
