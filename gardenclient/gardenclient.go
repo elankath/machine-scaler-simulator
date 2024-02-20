@@ -57,6 +57,7 @@ func InitShootAccess(projectName, shootName string) scalesim.ShootAccess {
 }
 
 func (s *shootAccess) GetShootObj() (*gardencore.Shoot, error) {
+	s.clearCommands()
 	slog.Info("shootAccess.GetShootObj().", "command", s.getShootCmd.String())
 	cmdOutput, err := s.getShootCmd.Output()
 	if err != nil {
@@ -68,7 +69,16 @@ func (s *shootAccess) GetShootObj() (*gardencore.Shoot, error) {
 	return serutil.DecodeShoot(cmdOutput)
 }
 
+func (s *shootAccess) clearCommands() {
+	s.getNodesCmd.Stdout = nil
+	s.getNodesCmd.Stderr = nil
+	s.getNodesCmd.Process = nil
+	s.getShootCmd.Stdout = nil
+	s.getShootCmd.Stderr = nil
+	s.getShootCmd.Process = nil
+}
 func (s *shootAccess) GetNodes() ([]corev1.Node, error) {
+	s.clearCommands()
 	slog.Info("shootAccess.GetNodes().", "command", s.getNodesCmd.String())
 	cmdOutput, err := s.getNodesCmd.Output()
 	if err != nil {

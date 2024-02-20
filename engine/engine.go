@@ -14,7 +14,6 @@ import (
 	"github.com/elankath/scaler-simulator/gardenclient"
 	"github.com/elankath/scaler-simulator/scenarios/a"
 	"github.com/elankath/scaler-simulator/scenarios/c"
-	"github.com/elankath/scaler-simulator/serutil"
 	"github.com/elankath/scaler-simulator/webutil"
 
 	scalesim "github.com/elankath/scaler-simulator"
@@ -106,7 +105,7 @@ func (e *engine) handleSyncShootNodes() http.Handler {
 				return
 			}
 			webutil.Log(w, "Syncing nodes for shoot: "+shootName+" ...")
-			err := e.SyncNodes(r.Context(), shootName)
+			err := e.SyncVirtualNodesWithShoot(r.Context(), shootName)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -115,7 +114,7 @@ func (e *engine) handleSyncShootNodes() http.Handler {
 	)
 }
 
-func (e *engine) SyncNodes(ctx context.Context, shootName string) error {
+func (e *engine) SyncVirtualNodesWithShoot(ctx context.Context, shootName string) error {
 	shootAccess := e.ShootAccess(shootName)
 	nodes, err := shootAccess.GetNodes()
 	if err != nil {
@@ -125,6 +124,11 @@ func (e *engine) SyncNodes(ctx context.Context, shootName string) error {
 	err = e.VirtualClusterAccess().AddNodes(ctx, nodes)
 	if err != nil {
 		slog.Error("cannot add nodes to virtual-cluster.", "error", err)
+		return err
+	}
+	err = e.VirtualClusterAccess().RemoveTaintFromNode(ctx)
+	if err != nil {
+		slog.Error("cannot un-taint node(s).", "error", err)
 		return err
 	}
 	slog.Info("added nodes to virtual cluster.", "num-nodes", len(nodes))
@@ -144,19 +148,19 @@ func (e *engine) handleClearVirtualCluster() http.Handler {
 	)
 }
 
-func (e *engine) ApplyPod(ctx context.Context, podSpecPath string, replicas int, waitSecs int) error {
-	pod, err := serutil.ReadPod(podSpecPath)
-	if err != nil {
-		return fmt.Errorf("cannot read pod spec %q: %w", podSpecPath, err)
-	}
-	for i := 0; i < replicas; i++ {
-		err = e.virtualAccess.CreatePods(ctx, pod)
-		if err != nil {
-			return fmt.Errorf("cannot create replica %d of pod spec %q: %w", i, podSpecPath, err)
-		}
-	}
-	return nil
-}
+//func (e *engine) ApplyPod(ctx context.Context, podSpecPath string, replicas int, waitSecs int) error {
+//	pod, err := serutil.ReadPod(podSpecPath)
+//	if err != nil {
+//		return fmt.Errorf("cannot read pod spec %q: %w", podSpecPath, err)
+//	}
+//	for i := 0; i < replicas; i++ {
+//		err = e.virtualAccess.CreatePods(ctx, pod)
+//		if err != nil {
+//			return fmt.Errorf("cannot create replica %d of pod spec %q: %w", i, podSpecPath, err)
+//		}
+//	}
+//	return nil
+//}
 
 func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
 	totalNodesCreated := 0

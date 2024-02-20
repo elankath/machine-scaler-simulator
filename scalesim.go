@@ -1,8 +1,11 @@
+// Package scalesim contains the API interface and structural types for the scaler simular project
 package scalesim
 
 import (
 	"context"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -13,11 +16,9 @@ import (
 // Engine is the primary simulation driver facade of the scaling simulator. Since Engine register routes for driving simulation scenarios it extends http.Handler
 type Engine interface {
 	http.Handler
-
 	VirtualClusterAccess() VirtualClusterAccess
 	ShootAccess(shootName string) ShootAccess
-	SyncNodes(ctx context.Context, shootName string) error
-	ApplyPod(ctx context.Context, podSpecPath string, replicas int, waitSecs int) error
+	SyncVirtualNodesWithShoot(ctx context.Context, shootName string) error
 	ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
 	ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
 }
@@ -35,6 +36,9 @@ type VirtualClusterAccess interface {
 
 	// CreatePods creates the given slice of k8s Pods in the virtual cluster
 	CreatePods(context.Context, ...corev1.Pod) error
+
+	// CreatePodsFromYaml loads the pod yaml at the given podYamlPath and creates Pods for given number of replicas.
+	CreatePodsFromYaml(ctx context.Context, podYamlPath string, replicas int) error
 
 	// ApplyK8sObject applies all Objects into the virtual cluster
 	ApplyK8sObject(context.Context, ...runtime.Object) error
@@ -63,6 +67,8 @@ type VirtualClusterAccess interface {
 	ListNodes(ctx context.Context) ([]corev1.Node, error)
 
 	ListPods(ctx context.Context) ([]corev1.Pod, error)
+
+	GetNodePodAssignments(ctx context.Context) ([]NodePodAssignment, error)
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster
@@ -85,4 +91,23 @@ type Scenario interface {
 	Name() string
 	//ShootName is the name of the shoot that the scenario executes against
 	ShootName() string
+}
+
+type NodePodAssignment struct {
+	NodeName        string
+	PoolName        string
+	InstanceType    string
+	PodNameAndCount map[string]int
+}
+
+func (n NodePodAssignment) String() string {
+	var sb strings.Builder
+	sb.WriteString("(Node: " + n.NodeName + ", PoolName: " + n.PoolName + ", InstanceType: " + n.InstanceType + ", PodAssignments: ")
+	for k, v := range n.PodNameAndCount {
+		sb.WriteString("[")
+		sb.WriteString(k + ":" + strconv.Itoa(v))
+		sb.WriteString("],")
+	}
+	sb.WriteString(")")
+	return sb.String()
 }

@@ -11,13 +11,5 @@ spec:
       resources:
         requests:
           cpu: 100m
-          memory: 2Gi
-      terminationMessagePath: /dev/termination-log
-      terminationMessagePolicy: File
-      imagePullPolicy: IfNotPresent
-  restartPolicy: Always
-  terminationGracePeriodSeconds: 0
-  dnsPolicy: ClusterFirst
-  securityContext: {}
-  enableServiceLinks: true
+          memory: 1.8Gi
 

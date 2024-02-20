@@ -24,20 +24,21 @@ func New(engine scalesim.Engine) scalesim.Scenario {
 
 func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	webutil.Log(w, "Commencing scenario: "+s.Name()+"...")
-	err := s.engine.SyncNodes(r.Context(), shootName)
+	webutil.Log(w, "Clearing virtual cluster..")
+	err := s.engine.VirtualClusterAccess().ClearAll(r.Context())
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
 	}
-	if err := s.engine.VirtualClusterAccess().RemoveTaintFromNode(r.Context()); err != nil {
+	err = s.engine.SyncVirtualNodesWithShoot(r.Context(), shootName)
+	if err != nil {
 		webutil.InternalError(w, err)
 		return
 	}
 	podCount := webutil.GetIntQueryParam(r, "podCount", 4)
 	podSpecPath := "scenarios/a/pod.yaml"
-	waitSecs := 15
-	webutil.Log(w, fmt.Sprintf("Applying %d replicas of pod spec: %s and waiting for: %d secs", podCount, podSpecPath, waitSecs))
-	err = s.engine.ApplyPod(r.Context(), podSpecPath, podCount, waitSecs)
+	webutil.Log(w, fmt.Sprintf("Applying %d replicas of pod spec: %s and waiting for: %d secs", podCount, podSpecPath))
+	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, podCount)
 	if err != nil {
 		webutil.InternalError(w, err)
 		return

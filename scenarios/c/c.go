@@ -28,12 +28,15 @@ func New(engine scalesim.Engine) scalesim.Scenario {
 // Then wait till all Pods are scheduled or till timeout.
 func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	webutil.Log(w, "Commencing scenario: "+s.Name()+"...")
-	err := s.engine.SyncNodes(r.Context(), shootName)
+	webutil.Log(w, "Clearing virtual cluster..")
+	err := s.engine.VirtualClusterAccess().ClearAll(r.Context())
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
 	}
-	if err := s.engine.VirtualClusterAccess().RemoveTaintFromNode(r.Context()); err != nil {
+	webutil.Log(w, fmt.Sprintf("Synchronizing virtual nodes with nodes of shoot: %s ...", shootName))
+	err = s.engine.SyncVirtualNodesWithShoot(r.Context(), shootName)
+	if err != nil {
 		webutil.InternalError(w, err)
 		return
 	}
@@ -46,13 +49,12 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	largeCount := webutil.GetIntQueryParam(r, "large", 8)  // total = 8*7=56M large
 
 	podSpecPath := "scenarios/c/podSmall.yaml"
-	waitSecs := 10
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
 	}
 	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, smallCount))
-	err = s.engine.ApplyPod(r.Context(), podSpecPath, smallCount, waitSecs)
+	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, smallCount)
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
@@ -60,7 +62,7 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	podSpecPath = "scenarios/c/podLarge.yaml"
 	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, largeCount))
-	err = s.engine.ApplyPod(r.Context(), podSpecPath, largeCount, waitSecs)
+	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, largeCount)
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
@@ -81,34 +83,14 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nodes, err := s.engine.VirtualClusterAccess().ListNodes(r.Context())
+	nodePodAssignments, err := s.engine.VirtualClusterAccess().GetNodePodAssignments(r.Context())
 	if err != nil {
-		webutil.Log(w, "cant list nodes of virtual cluster. Error: "+err.Error())
+		webutil.InternalError(w, err)
 		return
-	}
-	pods, err := s.engine.VirtualClusterAccess().ListPods(r.Context())
-	if err != nil {
-		webutil.Log(w, "cant list pods of virtual cluster. Error: "+err.Error())
-		return
-	}
-	nodesToPodNames := make(map[string][]string)
-	for _, n := range nodes {
-		nodesToPodNames[n.Name] = make([]string, 0)
-	}
-	for _, p := range pods {
-		if p.Spec.NodeName != "" {
-			nodesToPodNames[p.Spec.NodeName] = append(nodesToPodNames[p.Spec.NodeName], p.Name)
-		}
-	}
-
-	for name, pods := range nodesToPodNames {
-		if len(pods) == 0 {
-			continue
-		}
-		webutil.Log(w, fmt.Sprintf("Node: %s, Assigned Pods: %s", name, pods))
 	}
 
 	webutil.Log(w, fmt.Sprintf("Congrats! Scenario-%s Successful!", s.Name()))
+	webutil.LogNodePodAssignments(w, s.Name(), nodePodAssignments)
 	slog.Info("Execution of scenario " + s.Name() + " completed!")
 
 }

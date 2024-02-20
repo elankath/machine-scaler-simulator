@@ -1,13 +1,16 @@
 package virtualcluster
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"syscall"
 
+	"golang.org/x/exp/maps"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +25,7 @@ import (
 	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
 
 	scalesim "github.com/elankath/scaler-simulator"
+	"github.com/elankath/scaler-simulator/serutil"
 )
 
 var kubeConfigPath = "/tmp/scalesim-kubeconfig.yaml"
@@ -32,6 +36,8 @@ type access struct {
 	environment          *envtest.Environment
 	kubeSchedulerProcess *os.Process
 }
+
+var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implements I.
 
 func (a *access) CreatePods(ctx context.Context, pods ...corev1.Pod) error {
 	for _, pod := range pods {
@@ -44,7 +50,19 @@ func (a *access) CreatePods(ctx context.Context, pods ...corev1.Pod) error {
 	return nil
 }
 
-var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implements I.
+func (a *access) CreatePodsFromYaml(ctx context.Context, podYamlPath string, replicas int) error {
+	pod, err := serutil.ReadPod(podYamlPath)
+	if err != nil {
+		return fmt.Errorf("cannot read pod spec %q: %w", podYamlPath, err)
+	}
+	for i := 0; i < replicas; i++ {
+		err = a.CreatePods(ctx, pod)
+		if err != nil {
+			return fmt.Errorf("cannot create replica %d of pod spec %q: %w", i, podYamlPath, err)
+		}
+	}
+	return nil
+}
 
 func (a *access) KubeConfigPath() string {
 	return kubeConfigPath
@@ -253,7 +271,7 @@ func (a *access) CreateNodeInWorkerGroup(ctx context.Context, wg *v1beta1.Worker
 	}
 	node := corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("wg-%s-", wg.Name),
+			GenerateName: fmt.Sprintf("%s-", wg.Name),
 			Namespace:    "default",
 			//TODO Change k8s hostname labels
 			Labels: deployedNode.Labels,
@@ -261,6 +279,7 @@ func (a *access) CreateNodeInWorkerGroup(ctx context.Context, wg *v1beta1.Worker
 		Status: corev1.NodeStatus{
 			Allocatable: deployedNode.Status.Allocatable,
 			Capacity:    deployedNode.Status.Capacity,
+			Phase:       corev1.NodeRunning,
 		},
 	}
 	if err := a.client.Create(ctx, &node); err != nil {
@@ -313,6 +332,45 @@ func (a *access) ClearPods(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (a *access) GetNodePodAssignments(ctx context.Context) ([]scalesim.NodePodAssignment, error) {
+	nodes, err := a.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	assignMap := make(map[string]scalesim.NodePodAssignment)
+	for _, n := range nodes {
+		assignMap[n.Name] = scalesim.NodePodAssignment{
+			NodeName:        n.Name,
+			PoolName:        n.Labels["worker.gardener.cloud/pool"],
+			InstanceType:    n.Labels["node.kubernetes.io/instance-type"],
+			PodNameAndCount: make(map[string]int),
+		}
+	}
+	pods, err := a.ListPods(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range pods {
+		nodeName := p.Spec.NodeName
+		if nodeName == "" {
+			continue
+		}
+		podNameCategory := p.ObjectMeta.GenerateName
+		a := assignMap[nodeName]
+		a.PodNameAndCount[podNameCategory]++
+	}
+	for n, a := range assignMap {
+		if len(a.PodNameAndCount) == 0 {
+			delete(assignMap, n)
+		}
+	}
+	assignments := maps.Values(assignMap)
+	slices.SortFunc(assignments, func(a, b scalesim.NodePodAssignment) int {
+		return cmp.Compare(a.PoolName, b.PoolName)
+	})
+	return assignments, nil
 }
 
 func createKubeconfigFileForRestConfig(restConfig rest.Config) error {

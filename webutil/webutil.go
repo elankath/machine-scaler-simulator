@@ -5,7 +5,10 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+
+	scalesim "github.com/elankath/scaler-simulator"
 )
 
 func SetupSSEWriter(w http.ResponseWriter) {
@@ -17,6 +20,16 @@ func SetupSSEWriter(w http.ResponseWriter) {
 func Log(w http.ResponseWriter, msg string) {
 	fmt.Fprintf(w, "[ %s ] : %s\n", time.Now().Format("2006-01-02 15:04:05"), msg)
 	w.(http.Flusher).Flush()
+}
+
+func LogNodePodAssignments(w http.ResponseWriter, scenarioName string, nodePodAssignments []scalesim.NodePodAssignment) {
+	var sb strings.Builder
+	sb.WriteString("Scenario-" + scenarioName + ", NodePodAssignments Are:\n")
+	for _, a := range nodePodAssignments {
+		sb.WriteString(a.String())
+		sb.WriteString("\n")
+	}
+	Log(w, sb.String())
 }
 
 func HandleShootNameMissing(w http.ResponseWriter) {
