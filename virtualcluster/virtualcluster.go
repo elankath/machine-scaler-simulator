@@ -19,8 +19,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
-	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
+
+	scalesim "github.com/elankath/scaler-simulator"
 )
 
 var kubeConfigPath = "/tmp/scalesim-kubeconfig.yaml"
@@ -170,7 +171,7 @@ func (a *access) GetFailedSchedulingEvents(ctx context.Context) ([]corev1.Event,
 	return FailedSchedulingEvents, nil
 }
 
-func (a *access) ApplyK8sObject(ctx context.Context, k8sObjs []runtime.Object) error {
+func (a *access) ApplyK8sObject(ctx context.Context, k8sObjs ...runtime.Object) error {
 	for _, obj := range k8sObjs {
 		switch obj.(type) { //TODO: add more cases here as and when needed
 		case *corev1.Pod:

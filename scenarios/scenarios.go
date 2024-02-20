@@ -3,23 +3,21 @@ package scenarios
 import (
 	"context"
 	"fmt"
-	"github.com/elankath/scaler-simulator/utils"
 	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/elankath/scaler-simulator/serutil"
+	"github.com/elankath/scaler-simulator/webutil"
+
 	scalesim "github.com/elankath/scaler-simulator"
 )
-
-// type scenarios struct {
-// 	engine scalesim.Engine
-// }
 
 // One worker pool, min=1, max=2
 // 1 node up
 // Add multiple pods. Should assign some pods to the running node, and recommand scaling up a node for the remaining
-func NewScenarioA(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter, podsCount int) {
+func NewScenarioAOld(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter, podsCount int) {
 	fmt.Fprintln(w, "Executing scenario A")
 
 	SyncNodesInShoot(ctx, virtualAccess, shootAccess, w)
@@ -28,14 +26,14 @@ func NewScenarioA(ctx context.Context, virtualAccess scalesim.VirtualClusterAcce
 		return
 	}
 
-	objects, err := shootAccess.ConstructK8sObject(GetYamlFilePath("scenarioA_objects.yaml"))
+	objects, err := serutil.ConstructK8sObject(GetYamlFilePath("pod.yaml"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	for i := 0; i < podsCount; i++ {
-		err = virtualAccess.ApplyK8sObject(ctx, objects)
+		err = virtualAccess.ApplyK8sObject(ctx, objects...)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -86,7 +84,7 @@ func NewScenarioA(ctx context.Context, virtualAccess scalesim.VirtualClusterAcce
 }
 
 func NewScenarioB(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter, podsCount int) {
-	utils.LogEvent(w, "Executing scenario B")
+	webutil.Log(w, "Executing scenario B")
 
 	SyncNodesInShoot(ctx, virtualAccess, shootAccess, w)
 	if err := virtualAccess.RemoveTaintFromNode(ctx); err != nil {
@@ -94,7 +92,7 @@ func NewScenarioB(ctx context.Context, virtualAccess scalesim.VirtualClusterAcce
 		return
 	}
 
-	pod, err := shootAccess.ConstructPod(GetYamlFilePath("scenarioB_pods.yaml"))
+	pod, err := serutil.ReadPod(GetYamlFilePath("scenarioB_pods.yaml"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -149,11 +147,11 @@ func NewScenarioB(ctx context.Context, virtualAccess scalesim.VirtualClusterAcce
 		<-time.After(15 * time.Second)
 	}
 	slog.Log(ctx, slog.LevelInfo, "No unscheduled pods present. Finishing scenario A", "num-nodes-created", TotalNodesCreated)
-	utils.LogEvent(w, "Done Execution of scenario B")
+	webutil.Log(w, "Done Execution of scenario B")
 }
 
 func NewScenarioC(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter, podsACount, podsBCount int) {
-	utils.LogEvent(w, "Executing scenario C")
+	webutil.Log(w, "Executing scenario C")
 
 	SyncNodesInShoot(ctx, virtualAccess, shootAccess, w)
 	if err := virtualAccess.RemoveTaintFromNode(ctx); err != nil {
@@ -161,13 +159,13 @@ func NewScenarioC(ctx context.Context, virtualAccess scalesim.VirtualClusterAcce
 		return
 	}
 
-	podA, err := shootAccess.ConstructPod(GetYamlFilePath("scenarioC_podA.yaml"))
+	podA, err := serutil.ReadPod(GetYamlFilePath("scenarioC_podA.yaml"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	podB, err := shootAccess.ConstructPod(GetYamlFilePath("scenarioC_podB.yaml"))
+	podB, err := serutil.ReadPod(GetYamlFilePath("scenarioC_podB.yaml"))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -233,7 +231,7 @@ func NewScenarioC(ctx context.Context, virtualAccess scalesim.VirtualClusterAcce
 		}
 	}
 	slog.Log(ctx, slog.LevelInfo, "No unscheduled pods present. Finishing scenario C", "num-nodes-created", TotalNodesCreated)
-	utils.LogEvent(w, "Done Execution of scenario C")
+	webutil.Log(w, "Done Execution of scenario C")
 }
 
 func SyncNodesInShoot(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess, w http.ResponseWriter) {

@@ -6,18 +6,12 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"strings"
 
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/apimachinery/pkg/runtime/serializer/json"
-
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 
 	scalesim "github.com/elankath/scaler-simulator"
+	"github.com/elankath/scaler-simulator/serutil"
 )
 
 type shootAccess struct {
@@ -25,7 +19,6 @@ type shootAccess struct {
 	shootName   string
 	getShootCmd *exec.Cmd
 	getNodesCmd *exec.Cmd
-	codec       runtime.Codec
 	////shoot
 	//shoot *gardencore.Shoot
 	////Nodes
@@ -42,7 +35,7 @@ func (s *shootAccess) ShootName() string {
 
 var _ scalesim.ShootAccess = (*shootAccess)(nil)
 
-func InitShootAccess(projectName, shootName string) (scalesim.ShootAccess, error) {
+func InitShootAccess(projectName, shootName string) scalesim.ShootAccess {
 	cmdEnv := os.Environ()
 	cmdEnv = append(cmdEnv, fmt.Sprintf("KUBECONFIG=%s", os.Getenv("GARDENCTL_KUBECONFIG")))
 	cmdEnv = append(cmdEnv, "GCTL_SESSION_ID=scalesim")
@@ -55,68 +48,12 @@ func InitShootAccess(projectName, shootName string) (scalesim.ShootAccess, error
 	getNodesCmd := exec.Command("bash", "-l", "-c", shellCmd)
 	getNodesCmd.Env = cmdEnv
 
-	configScheme := runtime.NewScheme()
-	utilruntime.Must(gardencore.AddToScheme(configScheme))
-	utilruntime.Must(corev1.AddToScheme(configScheme))
-	ser := json.NewSerializerWithOptions(json.DefaultMetaFactory, configScheme, configScheme, json.SerializerOptions{
-		Yaml:   true,
-		Pretty: false,
-		Strict: false,
-	})
-	versions := schema.GroupVersions([]schema.GroupVersion{
-		gardencore.SchemeGroupVersion,
-		corev1.SchemeGroupVersion,
-	})
-	codec := serializer.NewCodecFactory(configScheme).CodecForVersions(ser, ser, versions, versions)
-
 	return &shootAccess{
 		projectName: projectName,
 		shootName:   shootName,
 		getShootCmd: getShootCmd,
 		getNodesCmd: getNodesCmd,
-		codec:       codec,
-	}, nil
-}
-
-func (s *shootAccess) ConstructK8sObject(path string) ([]runtime.Object, error) {
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
 	}
-
-	stringFromBytes := string(bytes)
-
-	var ObjectList []runtime.Object
-	for _, podSpec := range strings.Split(stringFromBytes, "---") {
-		if len(podSpec) == 0 {
-			continue
-		}
-		obj, err := runtime.Decode(s.codec, []byte(podSpec))
-		if err != nil {
-			slog.Error("cannot decode object", "error", err)
-			return nil, err
-		}
-		ObjectList = append(ObjectList, obj)
-	}
-
-	return ObjectList, nil
-}
-
-func (s *shootAccess) ConstructPod(path string) (corev1.Pod, error) {
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		return corev1.Pod{}, err
-	}
-
-	pod := corev1.Pod{}
-	obj, err := runtime.Decode(s.codec, bytes)
-	if err != nil {
-		slog.Error("cannot decode object", "error", err)
-		return corev1.Pod{}, err
-	}
-	pod = *(obj.(*corev1.Pod))
-
-	return pod, nil
 }
 
 func (s *shootAccess) GetShootObj() (*gardencore.Shoot, error) {
@@ -128,13 +65,7 @@ func (s *shootAccess) GetShootObj() (*gardencore.Shoot, error) {
 		slog.Error("cannot get shoot obj", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
 		return nil, err
 	}
-	obj, err := runtime.Decode(s.codec, cmdOutput)
-	if err != nil {
-		slog.Error("cannot decode command output", "error", err)
-		return nil, err
-	}
-	var shoot = *(obj.(*gardencore.Shoot))
-	return &shoot, nil
+	return serutil.DecodeShoot(cmdOutput)
 }
 
 func (s *shootAccess) GetNodes() ([]corev1.Node, error) {
@@ -146,24 +77,5 @@ func (s *shootAccess) GetNodes() ([]corev1.Node, error) {
 		slog.Error("cannot get shoot nodes", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
 		return nil, err
 	}
-	obj, err := runtime.Decode(s.codec, cmdOutput)
-	if err != nil {
-		slog.Error("cannot decode command output", "error", err)
-		return nil, err
-	}
-	var list corev1.List
-	var nodeList []corev1.Node
-	list = *(obj.(*corev1.List))
-	for _, item := range list.Items {
-		var node corev1.Node
-		bytes := item.Raw
-		decodedObj, err := runtime.Decode(s.codec, bytes)
-		if err != nil {
-			slog.Error("error decoding node", "error", err)
-			return nil, err
-		}
-		node = *(decodedObj.(*corev1.Node))
-		nodeList = append(nodeList, node)
-	}
-	return nodeList, nil
+	return serutil.DecodeNodeList(cmdOutput)
 }

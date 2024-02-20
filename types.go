@@ -2,7 +2,6 @@ package scalesim
 
 import (
 	"context"
-	"io"
 	"net/http"
 
 	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -16,8 +15,10 @@ type Engine interface {
 	http.Handler
 
 	VirtualClusterAccess() VirtualClusterAccess
-
-	ShootAccess() ShootAccess
+	ShootAccess(shootName string) ShootAccess
+	SyncNodes(ctx context.Context, shootName string) error
+	ApplyPod(ctx context.Context, podSpecPath string, replicas int, waitSecs int) error
+	ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
 }
 
 // VirtualClusterAccess represents access to the virtualcluster cluster managed by the simulator that shadows the real cluster
@@ -35,7 +36,7 @@ type VirtualClusterAccess interface {
 	CreatePods(context.Context, ...corev1.Pod) error
 
 	// ApplyK8sObject applies all Objects into the virtual cluster
-	ApplyK8sObject(context.Context, []runtime.Object) error
+	ApplyK8sObject(context.Context, ...runtime.Object) error
 
 	// GetFailedSchedulingEvents get all FailedSchedulingEvents whose referenced pod does not have a node assigned
 	GetFailedSchedulingEvents(context.Context) ([]corev1.Event, error)
@@ -61,22 +62,19 @@ type ShootAccess interface {
 	// ProjectName returns the project name that the shoot belongs to
 	ProjectName() string
 
-	// ShootName returns the name of the shoot
-	ShootName() string
-
 	// GetShootObj returns the shoot object describing the shoot cluster
 	GetShootObj() (*gardencore.Shoot, error)
 
 	// GetNodes returns slice of nodes of the shoot cluster
 	GetNodes() ([]corev1.Node, error)
-
-	// ConstructK8sObject reads a yaml file containing k8s resources and creates objects
-	ConstructK8sObject(path string) ([]runtime.Object, error)
-
-	ConstructPod(path string) (corev1.Pod, error)
 }
 
-type Scenarios interface {
-	// Run
-	Run(io.Writer) error
+// Scenario represents a scaling simulation scenario. Each scenario is invocable by an HTTP endpoint and hence extends http.Handler
+type Scenario interface {
+	http.Handler
+	Description() string
+	// Name is the name of this scenario
+	Name() string
+	//ShootName is the name of the shoot that the scenario executes against
+	ShootName() string
 }
