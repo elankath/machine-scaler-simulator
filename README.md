@@ -28,11 +28,21 @@ Scaling Simulator that determines which garden worker pool must be scaled to hos
 ## Usage
 
 
-### Commands
+### Op Commands
 
 #### Sync Virtual Cluster with Shoot Cluster
 
-`curl -XPOST localhost:8080/api/sync-shoot-nodes`
+`curl -XPOST localhost:8080/op/sync/<myShoot>`
+
+#### Clear Virtual Cluster
+
+`curl -XDELETE localhost:8080/op/virtual-cluster`
+`curl -XDELE localhost:8080/scenarios/A`
+
+### Scenario Commands
+
+##### Execute Scenario A
+`curl -XPOST localhost:8080/scenarios/A`
 
 ## Objectives
 
