@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/webutil"
@@ -41,15 +42,8 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, err)
 		return
 	}
-	numCreatedNodes, err := s.engine.ScaleAllWorkerPoolsTillMax(r.Context(), s.Name(), shoot, w)
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
-	webutil.Log(w, fmt.Sprintf("Created %d total nodes", numCreatedNodes))
-
-	smallCount := webutil.GetIntQueryParam(r, "small", 8) //total = 16 small
-	largeCount := webutil.GetIntQueryParam(r, "large", 4) // total = 28 large
+	smallCount := webutil.GetIntQueryParam(r, "small", 12) //total = 12x2=24M small
+	largeCount := webutil.GetIntQueryParam(r, "large", 8)  // total = 8*7=56M large
 
 	podSpecPath := "scenarios/c/podSmall.yaml"
 	waitSecs := 10
@@ -71,7 +65,16 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, err)
 		return
 	}
-	webutil.Log(w, "Scenario-C complete.Kindly wait and check scheduling")
+	webutil.Log(w, fmt.Sprintf("Deployed %d Pods..wait for scheduler to sync...", smallCount+largeCount))
+	<-time.After(8 * time.Second)
+
+	webutil.Log(w, "Scaling till worker pool max...")
+	numCreatedNodes, err := s.engine.ScaleAllWorkerPoolsTillMax(r.Context(), s.Name(), shoot, w)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+	webutil.Log(w, fmt.Sprintf("Created %d total nodes", numCreatedNodes))
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
@@ -99,32 +102,15 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for name, pods := range nodesToPodNames {
+		if len(pods) == 0 {
+			continue
+		}
 		webutil.Log(w, fmt.Sprintf("Node: %s, Assigned Pods: %s", name, pods))
 	}
 
-	webutil.Log(w, fmt.Sprintf("Congrats! Scenario-%s Successful!"))
+	webutil.Log(w, fmt.Sprintf("Congrats! Scenario-%s Successful!", s.Name()))
 	slog.Info("Execution of scenario " + s.Name() + " completed!")
 
-	//waitSecs := 15
-	//	webutil.Log(w, fmt.Sprintf("Applying %d replicas of pod spec: %s and waiting for: %d secs", podCount, podSpecPath, waitSecs))
-
-	//	podA, err := serutil.ReadPod(GetYamlFilePath("scenarioC_podA.yaml"))
-	//	if err != nil {
-	//		http.Error(w, err.Error(), http.StatusInternalServerError)
-	//		return
-	//	}
-	//
-	//	podB, err := serutil.ReadPod(GetYamlFilePath("scenarioC_podB.yaml"))
-	//	if err != nil {
-	//		http.Error(w, err.Error(), http.StatusInternalServerError)
-	//		return
-	//	}
-
-	//err = s.engine.ApplyPod(r.Context(), podSpecPath, podCount, waitSecs)
-	//if err != nil {
-	//	return
-	//}
-	//_, err = s.engine.ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(r.Context(), s.Name(), shoot, w)
 }
 
 var _ scalesim.Scenario = (*scenarioC)(nil)
