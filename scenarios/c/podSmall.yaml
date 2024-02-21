@@ -6,6 +6,7 @@ metadata:
   labels: {}
 spec:
   schedulerName: bin-packing-scheduler
+  terminationGracePeriodSeconds: 0
   containers:
     - name: pause
       image: registry.k8s.io/pause:3.5
