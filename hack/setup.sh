@@ -92,12 +92,24 @@ main() {
 
   if [[ ! -f "$binaryAssetsDir/kube-scheduler" ]]; then
     echo -e "No kube-scheduler binary in: $binaryAssetsDir"
-    echo "Building kube-scheduler"
+    echo "Building kube-scheduler..."
     pushd "$KUBE_SOURCE_DIR" > /dev/null
     go build -v -o /tmp/kube-scheduler cmd/kube-scheduler/scheduler.go
     chmod +w "$binaryAssetsDir"
     cp -v /tmp/kube-scheduler "$binaryAssetsDir"
+    ls -al "$binaryAssetsDir/kube-scheduler"
     popd > /dev/null
+  fi
+
+  if [[ ! -f "$binaryAssetsDir/kube-controller-manager" ]]; then
+    echo -e "No kube-controller-manager binary in: $binaryAssetsDir"
+    echo "Building kube-controller-manager..."
+    pushd "$KUBE_SOURCE_DIR" > /dev/null
+    go build -v -o /tmp/kube-controller-manager cmd/kube-controller-manager/controller-manager.go
+    chmod +w "$binaryAssetsDir"
+    cp -v /tmp/kube-controller-manager "$binaryAssetsDir"
+    popd > /dev/null
+    ls -al "$binaryAssetsDir/kube-controller-manager"
   fi
 
 
