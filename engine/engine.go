@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/elankath/scaler-simulator/scenarios/d"
+	corev1 "k8s.io/api/core/v1"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -73,6 +75,9 @@ func (e *engine) addRoutes() {
 	scenarioC := c.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioC.Name(), scenarioC)
 
+	scenarioD := d.New(e)
+	e.mux.Handle("POST /scenarios/"+scenarioD.Name(), scenarioD)
+
 }
 
 //func handleScenarioC(virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess) http.Handler {
@@ -122,16 +127,26 @@ func (e *engine) SyncVirtualNodesWithShoot(ctx context.Context, shootName string
 		slog.Error("cannot get nodes from shoot.", "shoot", shootName, "error", err)
 		return err
 	}
+
+	for _, node := range nodes {
+		node.Labels["app.kubernetes.io/existing-node"] = "true"
+		node.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
+			Key:    "app.kubernetes.io/existing-node-no-schedule",
+			Value:  "NoSchedule",
+			Effect: corev1.TaintEffectNoSchedule,
+		})
+	}
+
 	err = e.VirtualClusterAccess().AddNodes(ctx, nodes...)
 	if err != nil {
 		slog.Error("cannot add nodes to virtual-cluster.", "error", err)
 		return err
 	}
-	err = e.VirtualClusterAccess().RemoveTaintFromNode(ctx)
-	if err != nil {
-		slog.Error("cannot un-taint node(s).", "error", err)
-		return err
-	}
+	//err = e.VirtualClusterAccess().RemoveTaintFromVirtualNodes(ctx)
+	//if err != nil {
+	//	slog.Error("cannot un-taint node(s).", "error", err)
+	//	return err
+	//}
 	slog.Info("added nodes to virtual cluster.", "num-nodes", len(nodes))
 	return nil
 }
@@ -149,11 +164,11 @@ func (e *engine) handleClearVirtualCluster() http.Handler {
 	)
 }
 
-func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
+func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, since time.Time, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
 	totalNodesCreated := 0
 	waitSecs := 5
 	for {
-		eventList, err := simutil.GetFailedSchedulingEvents(ctx, e.virtualAccess)
+		eventList, err := simutil.GetFailedSchedulingEvents(ctx, e.virtualAccess, since)
 		if err != nil {
 			webutil.InternalError(w, err)
 			return totalNodesCreated, err
@@ -177,7 +192,7 @@ func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context,
 				webutil.InternalError(w, err)
 				return totalNodesCreated, err
 			}
-			if err := e.virtualAccess.RemoveTaintFromNode(ctx); err != nil {
+			if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
 				webutil.InternalError(w, err)
 				return totalNodesCreated, err
 			}
@@ -196,15 +211,32 @@ func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName st
 	totalNodesCreated := 0
 	for _, pool := range shoot.Spec.Provider.Workers {
 		//e.virtualAccess.ListNodes(ctx)
-		err := simutil.CreateNodesTillMax(ctx, e.virtualAccess, &pool)
+		err := simutil.CreateNodesTillPoolMax(ctx, e.virtualAccess, &pool)
 		if err != nil {
 			return totalNodesCreated, err
 		}
 		webutil.Log(w, fmt.Sprintf("Created nodes in pool %q till max %d", pool.Name, pool.Maximum))
-		if err := e.virtualAccess.RemoveTaintFromNode(ctx); err != nil {
+		if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
 			return totalNodesCreated, err
 		}
 		totalNodesCreated += int(pool.Maximum)
+	}
+	return totalNodesCreated, nil
+}
+
+func (e *engine) ScaleWorkerPoolsTillNumZonesxPoolsMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
+	webutil.Log(w, "Scaling worker pools til zone*pool max for scenario: "+scenarioName)
+	totalNodesCreated := 0
+	for _, pool := range shoot.Spec.Provider.Workers {
+		err := simutil.CreateNodesTillZonexPoolMax(ctx, e.virtualAccess, shoot.Spec.Region, &pool)
+		if err != nil {
+			return totalNodesCreated, err
+		}
+		webutil.Log(w, fmt.Sprintf("Created nodes in pool %q till max %d", pool.Name, pool.Maximum))
+		if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
+			return totalNodesCreated, err
+		}
+		totalNodesCreated += len(pool.Zones) * (int)(pool.Maximum)
 	}
 	return totalNodesCreated, nil
 }

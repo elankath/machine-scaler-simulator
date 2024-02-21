@@ -172,7 +172,7 @@ func (a *access) ListEvents(ctx context.Context) ([]corev1.Event, error) {
 	return eventList.Items, nil
 }
 
-func (a *access) RemoveTaintFromNode(ctx context.Context) error {
+func (a *access) RemoveTaintFromVirtualNodes(ctx context.Context) error {
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList); err != nil {
 		slog.Error("error listing nodes", "error", err)
@@ -180,6 +180,9 @@ func (a *access) RemoveTaintFromNode(ctx context.Context) error {
 	}
 
 	for _, no := range nodeList.Items {
+		if _, ok := no.Labels["app.kubernetes.io/existing-node"]; ok {
+			continue
+		}
 		node := corev1.Node{}
 		if err := a.client.Get(ctx, client.ObjectKeyFromObject(&no), &node); err != nil {
 			return err

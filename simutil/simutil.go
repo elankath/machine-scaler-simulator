@@ -19,7 +19,7 @@ import (
 
 // GetFailedSchedulingEvents get all FailedSchedulingEvents whose referenced pod does not have a node assigned
 // FIXME: This should take a since time.Time which is the scenario start time.
-func GetFailedSchedulingEvents(ctx context.Context, a scalesim.VirtualClusterAccess) ([]corev1.Event, error) {
+func GetFailedSchedulingEvents(ctx context.Context, a scalesim.VirtualClusterAccess, since time.Time) ([]corev1.Event, error) {
 	var failedSchedulingEvents []corev1.Event
 
 	events, err := a.ListEvents(ctx)
@@ -28,6 +28,10 @@ func GetFailedSchedulingEvents(ctx context.Context, a scalesim.VirtualClusterAcc
 		return nil, err
 	}
 	for _, event := range events {
+		sinceTime := metav1.NewTime(since)
+		if event.EventTime.BeforeTime(&sinceTime) {
+			continue
+		}
 		if event.Reason == "FailedScheduling" { //TODO: find if there a constant for 'FailedScheduling'
 			pod, err := a.GetPod(ctx, types.NamespacedName{Name: event.InvolvedObject.Name, Namespace: event.InvolvedObject.Namespace})
 			if err != nil {
@@ -43,7 +47,7 @@ func GetFailedSchedulingEvents(ctx context.Context, a scalesim.VirtualClusterAcc
 	return failedSchedulingEvents, nil
 }
 
-func WaitTillNoUnscheduledPodsOrTimeout(ctx context.Context, access scalesim.VirtualClusterAccess, timeout time.Duration) error {
+func WaitTillNoUnscheduledPodsOrTimeout(ctx context.Context, access scalesim.VirtualClusterAccess, timeout time.Duration, since time.Time) error {
 	pollSecs := 2
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -54,7 +58,7 @@ func WaitTillNoUnscheduledPodsOrTimeout(ctx context.Context, access scalesim.Vir
 			slog.Error(msg, "timeout", timeout, "error", ctx.Err())
 			return fmt.Errorf(msg+": %w", ctx.Err())
 		default:
-			eventList, err := GetFailedSchedulingEvents(ctx, access)
+			eventList, err := GetFailedSchedulingEvents(ctx, access, since)
 			if err != nil {
 				return fmt.Errorf("cant get failed scheduling events due to: w", err)
 			}
@@ -107,6 +111,55 @@ func GetNodePodAssignments(ctx context.Context, a scalesim.VirtualClusterAccess)
 	return assignments, nil
 }
 
+func CreateNodeInWorkerGroupForZone(ctx context.Context, a scalesim.VirtualClusterAccess, zone, region string, wg *v1beta1.Worker) (bool, error) {
+	nodes, err := a.ListNodes(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	var wgNodes []corev1.Node
+	for _, n := range nodes {
+		if n.Labels["worker.garden.sapcloud.io/group"] == wg.Name {
+			wgNodes = append(wgNodes, n)
+		}
+	}
+
+	if int32(len(wgNodes)) >= wg.Maximum {
+		return false, nil
+	}
+
+	var deployedNode *corev1.Node
+	for _, node := range wgNodes {
+		if node.Labels["worker.garden.sapcloud.io/group"] == wg.Name {
+			deployedNode = &node
+		}
+	}
+
+	if deployedNode == nil {
+		return false, nil
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: fmt.Sprintf("%s-", wg.Name),
+			Namespace:    "default",
+			//TODO Change k8s hostname labels
+			Labels: deployedNode.Labels,
+		},
+		Status: corev1.NodeStatus{
+			Allocatable: deployedNode.Status.Allocatable,
+			Capacity:    deployedNode.Status.Capacity,
+			Phase:       corev1.NodeRunning,
+		},
+	}
+	node.Labels["topology.kubernetes.io/zone"] = zone
+	node.Labels["topology.kubernetes.io/region"] = region
+	delete(node.Labels, "app.kubernetes.io/existing-node")
+	if err := a.AddNodes(ctx, node); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // CreateNodeInWorkerGroup creates a sample node if the passed workerGroup objects max has not been met
 func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAccess, wg *v1beta1.Worker) (bool, error) {
 	nodes, err := a.ListNodes(ctx)
@@ -148,14 +201,15 @@ func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAcces
 			Phase:       corev1.NodeRunning,
 		},
 	}
+	delete(node.Labels, "app.kubernetes.io/existing-node")
 	if err := a.AddNodes(ctx, node); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-// CreateNodesTillMax creates sample nodes in the given worker pool till the worker pool max is reached.
-func CreateNodesTillMax(ctx context.Context, a scalesim.VirtualClusterAccess, wg *v1beta1.Worker) error {
+// CreateNodesTillPoolMax creates sample nodes in the given worker pool till the worker pool max is reached.
+func CreateNodesTillPoolMax(ctx context.Context, a scalesim.VirtualClusterAccess, wg *v1beta1.Worker) error {
 	for i := int32(0); i < wg.Maximum; i++ {
 		created, err := CreateNodeInWorkerGroup(ctx, a, wg)
 		if err != nil {
@@ -166,4 +220,48 @@ func CreateNodesTillMax(ctx context.Context, a scalesim.VirtualClusterAccess, wg
 		}
 	}
 	return nil
+}
+
+// CreateNodesTillMax creates sample nodes in the given worker pool till the worker pool max is reached.
+func CreateNodesTillZonexPoolMax(ctx context.Context, a scalesim.VirtualClusterAccess, region string, wg *v1beta1.Worker) error {
+	for _, zone := range wg.Zones {
+		for i := int32(0); i < wg.Maximum; i++ {
+			created, err := CreateNodeInWorkerGroupForZone(ctx, a, zone, region, wg)
+			if err != nil {
+				return err
+			}
+			if !created {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func GetScalerRecommendation(ctx context.Context, a scalesim.VirtualClusterAccess, assignments []scalesim.NodePodAssignment) (scalesim.ScalerRecommendations, error) {
+	recommendation := make(map[string]int)
+	nodes, err := a.ListNodes(ctx)
+	if err != nil {
+		slog.Error("Error getting the nodes", "error", err)
+		return recommendation, err
+	}
+
+	virtualNodes := make(map[string]corev1.Node)
+
+	for _, node := range nodes {
+		if _, ok := node.Labels["app.kubernetes.io/existing-node"]; !ok {
+			virtualNodes[node.Name] = node
+		}
+	}
+
+	for _, assignment := range assignments {
+		if _, ok := virtualNodes[assignment.NodeName]; !ok {
+			continue
+		}
+		if len(assignment.PodNameAndCount) > 0 {
+			recommendation[assignment.PoolName]++
+		}
+	}
+
+	return recommendation, nil
 }
