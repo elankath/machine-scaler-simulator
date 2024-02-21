@@ -3,7 +3,8 @@ kind: Pod
 metadata:
   generateName: scenario-c-large-
   namespace: default
-  labels: {}
+  labels:
+    app.kubernetes.io/name: "scenario-c"
 spec:
   schedulerName: bin-packing-scheduler
   terminationGracePeriodSeconds: 0

@@ -1,6 +1,7 @@
 package virtualcluster
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"fmt"
@@ -289,14 +290,16 @@ func (a *access) CreateNodeInWorkerGroup(ctx context.Context, wg *v1beta1.Worker
 }
 
 func (a *access) ClearAll(ctx context.Context) (err error) {
-	err = a.ClearPods(ctx)
+	// kubectl delete all --all
+	var errBuffer bytes.Buffer
+	delCmd := exec.Command("kubectl", "--kubeconfig", kubeConfigPath, "delete", "all", "--all")
+	delCmd.Stderr = &errBuffer
+	out, err := delCmd.Output()
 	if err != nil {
-		return
+		slog.Error("failed to clear all objects.", "command", delCmd, "stderr", string(errBuffer.Bytes()))
+		return fmt.Errorf("failed to clear objects: %w", err)
 	}
-	err = a.ClearNodes(ctx)
-	if err != nil {
-		return
-	}
+	slog.Info("cleared all objects", "command", delCmd, "stdout", string(out))
 	return
 }
 
