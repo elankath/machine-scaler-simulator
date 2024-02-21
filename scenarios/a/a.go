@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/webutil"
@@ -35,6 +36,7 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, err)
 		return
 	}
+	scaleStartTime := time.Now()
 	podCount := webutil.GetIntQueryParam(r, "podCount", 4)
 	podSpecPath := "scenarios/a/pod.yaml"
 	webutil.Log(w, fmt.Sprintf("Applying %d replicas of pod spec: %s and waiting for: %d secs", podCount, podSpecPath))
@@ -47,7 +49,7 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	_, err = s.engine.ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(r.Context(), s.Name(), shoot, w)
+	_, err = s.engine.ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(r.Context(), s.Name(), scaleStartTime, shoot, w)
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)

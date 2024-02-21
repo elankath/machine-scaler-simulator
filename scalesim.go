@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -19,8 +20,9 @@ type Engine interface {
 	VirtualClusterAccess() VirtualClusterAccess
 	ShootAccess(shootName string) ShootAccess
 	SyncVirtualNodesWithShoot(ctx context.Context, shootName string) error
-	ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
+	ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, since time.Time, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
 	ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
+	ScaleWorkerPoolsTillNumZonesxPoolsMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
 }
 
 // VirtualClusterAccess represents access to the virtualcluster cluster managed by the simulator that shadows the real cluster
@@ -31,8 +33,8 @@ type VirtualClusterAccess interface {
 	// AddNodes adds the given slice of k8s Nodes to the virtual cluster
 	AddNodes(context.Context, ...corev1.Node) error
 
-	// RemoveTaintFromNode removed the NoSchedule taint from all nodes in the virtual cluster
-	RemoveTaintFromNode(context.Context) error
+	// RemoveTaintFromVirtualNodes removed the NoSchedule taint from all nodes in the virtual cluster
+	RemoveTaintFromVirtualNodes(context.Context) error
 
 	// CreatePods creates the given slice of k8s Pods in the virtual cluster
 	CreatePods(context.Context, ...corev1.Pod) error
@@ -100,5 +102,17 @@ func (n NodePodAssignment) String() string {
 		sb.WriteString("],")
 	}
 	sb.WriteString(")")
+	return sb.String()
+}
+
+type ScalerRecommendations map[string]int
+
+func (s ScalerRecommendations) String() string {
+	var sb strings.Builder
+	sb.WriteString("{")
+	for k, v := range s {
+		sb.WriteString(k + ":" + strconv.Itoa(v) + ",")
+	}
+	sb.WriteString("}")
 	return sb.String()
 }

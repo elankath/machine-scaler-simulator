@@ -46,6 +46,21 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, err)
 		return
 	}
+
+	scaleStartTime := time.Now()
+	webutil.Log(w, "Scaling till worker pool max...")
+	numCreatedNodes, err := s.engine.ScaleAllWorkerPoolsTillMax(r.Context(), s.Name(), shoot, w)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+	webutil.Log(w, fmt.Sprintf("Created %d total nodes", numCreatedNodes))
+	if err != nil {
+		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+		return
+	}
+
 	smallCount := webutil.GetIntQueryParam(r, "small", 12) //total = 12x2=24M small
 	largeCount := webutil.GetIntQueryParam(r, "large", 8)  // total = 8*7=56M large
 
@@ -69,24 +84,10 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	webutil.Log(w, fmt.Sprintf("Deployed %d Pods..wait for scheduler to sync...", smallCount+largeCount))
-	<-time.After(5 * time.Second)
-
-	webutil.Log(w, "Scaling till worker pool max...")
-	numCreatedNodes, err := s.engine.ScaleAllWorkerPoolsTillMax(r.Context(), s.Name(), shoot, w)
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
-	webutil.Log(w, fmt.Sprintf("Created %d total nodes", numCreatedNodes))
-	if err != nil {
-		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
-		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
-		return
-	}
 
 	timeoutSecs := 30 * time.Second
 	webutil.Logf(w, "Waiting till there are no unschedulable pods or timeout of %.2f secs", timeoutSecs.Seconds())
-	err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs)
+	err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs, scaleStartTime)
 	if err != nil { // TODO: too much repetition move this to scenarios as utility function
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
@@ -98,9 +99,17 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	recommendation, err := simutil.GetScalerRecommendation(r.Context(), s.engine.VirtualClusterAccess(), nodePodAssignments)
+	if err != nil {
+		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+		return
+	}
+
 	webutil.Log(w, fmt.Sprintf("Congrats! Scenario-%s Successful!", s.Name()))
 	webutil.LogNodePodAssignments(w, s.Name(), nodePodAssignments)
 	slog.Info("Execution of scenario " + s.Name() + " completed!")
+	webutil.Log(w, "Recommendation for Scaleup: "+recommendation.String())
 
 }
 
