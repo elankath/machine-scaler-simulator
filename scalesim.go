@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Engine is the primary simulation driver facade of the scaling simulator. Since Engine register routes for driving simulation scenarios it extends http.Handler
@@ -29,7 +29,7 @@ type VirtualClusterAccess interface {
 	KubeConfigPath() string
 
 	// AddNodes adds the given slice of k8s Nodes to the virtual cluster
-	AddNodes(context.Context, []corev1.Node) error
+	AddNodes(context.Context, ...corev1.Node) error
 
 	// RemoveTaintFromNode removed the NoSchedule taint from all nodes in the virtual cluster
 	RemoveTaintFromNode(context.Context) error
@@ -43,15 +43,6 @@ type VirtualClusterAccess interface {
 	// ApplyK8sObject applies all Objects into the virtual cluster
 	ApplyK8sObject(context.Context, ...runtime.Object) error
 
-	// GetFailedSchedulingEvents get all FailedSchedulingEvents whose referenced pod does not have a node assigned
-	GetFailedSchedulingEvents(context.Context) ([]corev1.Event, error)
-
-	// CreateNodeInWorkerGroup creates a sample node if the passed workerGroup objects max has not been met
-	CreateNodeInWorkerGroup(context.Context, *v1beta1.Worker) (bool, error)
-
-	// CreateNodesTillMax creates sample nodes in the given worker pool till the worker pool max is reached.
-	CreateNodesTillMax(context.Context, *v1beta1.Worker) error
-
 	// ClearAll clears all k8s objects from the virtual cluster.
 	ClearAll(ctx context.Context) error
 
@@ -64,11 +55,11 @@ type VirtualClusterAccess interface {
 	// Shutdown shuts down all components of the virtualcluster cluster. Log all errors encountered during shutdown
 	Shutdown()
 
+	GetPod(ctx context.Context, fullName types.NamespacedName) (*corev1.Pod, error)
+	ListEvents(cts context.Context) ([]corev1.Event, error)
 	ListNodes(ctx context.Context) ([]corev1.Node, error)
 
 	ListPods(ctx context.Context) ([]corev1.Pod, error)
-
-	GetNodePodAssignments(ctx context.Context) ([]NodePodAssignment, error)
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster

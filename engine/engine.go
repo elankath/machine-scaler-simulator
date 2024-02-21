@@ -14,6 +14,7 @@ import (
 	"github.com/elankath/scaler-simulator/gardenclient"
 	"github.com/elankath/scaler-simulator/scenarios/a"
 	"github.com/elankath/scaler-simulator/scenarios/c"
+	"github.com/elankath/scaler-simulator/simutil"
 	"github.com/elankath/scaler-simulator/webutil"
 
 	scalesim "github.com/elankath/scaler-simulator"
@@ -121,7 +122,7 @@ func (e *engine) SyncVirtualNodesWithShoot(ctx context.Context, shootName string
 		slog.Error("cannot get nodes from shoot.", "shoot", shootName, "error", err)
 		return err
 	}
-	err = e.VirtualClusterAccess().AddNodes(ctx, nodes)
+	err = e.VirtualClusterAccess().AddNodes(ctx, nodes...)
 	if err != nil {
 		slog.Error("cannot add nodes to virtual-cluster.", "error", err)
 		return err
@@ -148,25 +149,11 @@ func (e *engine) handleClearVirtualCluster() http.Handler {
 	)
 }
 
-//func (e *engine) ApplyPod(ctx context.Context, podSpecPath string, replicas int, waitSecs int) error {
-//	pod, err := serutil.ReadPod(podSpecPath)
-//	if err != nil {
-//		return fmt.Errorf("cannot read pod spec %q: %w", podSpecPath, err)
-//	}
-//	for i := 0; i < replicas; i++ {
-//		err = e.virtualAccess.CreatePods(ctx, pod)
-//		if err != nil {
-//			return fmt.Errorf("cannot create replica %d of pod spec %q: %w", i, podSpecPath, err)
-//		}
-//	}
-//	return nil
-//}
-
 func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
 	totalNodesCreated := 0
 	waitSecs := 5
 	for {
-		eventList, err := e.virtualAccess.GetFailedSchedulingEvents(ctx)
+		eventList, err := simutil.GetFailedSchedulingEvents(ctx, e.virtualAccess)
 		if err != nil {
 			webutil.InternalError(w, err)
 			return totalNodesCreated, err
@@ -179,7 +166,7 @@ func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context,
 		webutil.Log(w, fmt.Sprintf("%d Unscheduled pods present. Creating a new node to schedule these pods", len(eventList)))
 
 		for _, pool := range shoot.Spec.Provider.Workers {
-			nodeCreated, err := e.virtualAccess.CreateNodeInWorkerGroup(ctx, &pool)
+			nodeCreated, err := simutil.CreateNodeInWorkerGroup(ctx, e.virtualAccess, &pool)
 			if err != nil {
 				webutil.InternalError(w, err)
 				return totalNodesCreated, err
@@ -209,7 +196,7 @@ func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName st
 	totalNodesCreated := 0
 	for _, pool := range shoot.Spec.Provider.Workers {
 		//e.virtualAccess.ListNodes(ctx)
-		err := e.virtualAccess.CreateNodesTillMax(ctx, &pool)
+		err := simutil.CreateNodesTillMax(ctx, e.virtualAccess, &pool)
 		if err != nil {
 			return totalNodesCreated, err
 		}

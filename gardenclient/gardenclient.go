@@ -70,12 +70,16 @@ func (s *shootAccess) GetShootObj() (*gardencore.Shoot, error) {
 }
 
 func (s *shootAccess) clearCommands() {
-	s.getNodesCmd.Stdout = nil
-	s.getNodesCmd.Stderr = nil
-	s.getNodesCmd.Process = nil
-	s.getShootCmd.Stdout = nil
-	s.getShootCmd.Stderr = nil
-	s.getShootCmd.Process = nil
+	reset(s.getNodesCmd)
+	reset(s.getShootCmd)
+}
+
+func reset(c *exec.Cmd) {
+	c.Process = nil
+	c.Stdout = nil
+	c.Stderr = nil
+	c.ProcessState = nil
+	c.SysProcAttr = nil
 }
 func (s *shootAccess) GetNodes() ([]corev1.Node, error) {
 	s.clearCommands()

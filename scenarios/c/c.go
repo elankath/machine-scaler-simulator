@@ -7,6 +7,7 @@ import (
 	"time"
 
 	scalesim "github.com/elankath/scaler-simulator"
+	"github.com/elankath/scaler-simulator/simutil"
 	"github.com/elankath/scaler-simulator/webutil"
 )
 
@@ -68,7 +69,7 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	webutil.Log(w, fmt.Sprintf("Deployed %d Pods..wait for scheduler to sync...", smallCount+largeCount))
-	<-time.After(8 * time.Second)
+	<-time.After(5 * time.Second)
 
 	webutil.Log(w, "Scaling till worker pool max...")
 	numCreatedNodes, err := s.engine.ScaleAllWorkerPoolsTillMax(r.Context(), s.Name(), shoot, w)
@@ -83,7 +84,15 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	nodePodAssignments, err := s.engine.VirtualClusterAccess().GetNodePodAssignments(r.Context())
+	timeoutSecs := 30 * time.Second
+	webutil.Logf(w, "Waiting till there are no unschedulable pods or timeout of %.2f secs", timeoutSecs.Seconds())
+	err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs)
+	if err != nil { // TODO: too much repetition move this to scenarios as utility function
+		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+		return
+	}
+	nodePodAssignments, err := simutil.GetNodePodAssignments(r.Context(), s.engine.VirtualClusterAccess())
 	if err != nil {
 		webutil.InternalError(w, err)
 		return

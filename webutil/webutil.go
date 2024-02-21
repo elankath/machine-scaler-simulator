@@ -22,6 +22,11 @@ func Log(w http.ResponseWriter, msg string) {
 	w.(http.Flusher).Flush()
 }
 
+func Logf(w http.ResponseWriter, format string, a ...any) {
+	msg := fmt.Sprintf(format, a)
+	Log(w, msg)
+}
+
 func LogNodePodAssignments(w http.ResponseWriter, scenarioName string, nodePodAssignments []scalesim.NodePodAssignment) {
 	var sb strings.Builder
 	sb.WriteString("Scenario-" + scenarioName + ", NodePodAssignments Are:\n")

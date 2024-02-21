@@ -2,19 +2,16 @@ package virtualcluster
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
-	"slices"
 	"syscall"
+	"time"
 
-	"golang.org/x/exp/maps"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
@@ -22,8 +19,6 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
-
-	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/serutil"
@@ -132,7 +127,7 @@ func (a *access) Shutdown() {
 	return
 }
 
-func (a *access) AddNodes(ctx context.Context, nodes []corev1.Node) error {
+func (a *access) AddNodes(ctx context.Context, nodes ...corev1.Node) error {
 	for _, n := range nodes {
 		n.ObjectMeta.ResourceVersion = ""
 		n.ObjectMeta.UID = ""
@@ -162,6 +157,21 @@ func (a *access) ListPods(ctx context.Context) ([]corev1.Pod, error) {
 	return podList.Items, nil
 }
 
+func (a *access) GetPod(ctx context.Context, fullName types.NamespacedName) (*corev1.Pod, error) {
+	pod := corev1.Pod{}
+	err := a.client.Get(ctx, fullName, &pod)
+	return &pod, err
+}
+
+func (a *access) ListEvents(ctx context.Context) ([]corev1.Event, error) {
+	eventList := corev1.EventList{}
+	if err := a.client.List(ctx, &eventList); err != nil {
+		slog.Error("error listing nodes", "error", err)
+		return nil, err
+	}
+	return eventList.Items, nil
+}
+
 func (a *access) RemoveTaintFromNode(ctx context.Context) error {
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList); err != nil {
@@ -182,30 +192,6 @@ func (a *access) RemoveTaintFromNode(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (a *access) GetFailedSchedulingEvents(ctx context.Context) ([]corev1.Event, error) {
-	var FailedSchedulingEvents []corev1.Event
-
-	eventList := corev1.EventList{}
-	if err := a.client.List(ctx, &eventList); err != nil {
-		slog.Error("error listing nodes", "error", err)
-		return nil, err
-	}
-	for _, event := range eventList.Items {
-		if event.Reason == "FailedScheduling" { //TODO: find if there a constant for 'FailedScheduling'
-			pod := corev1.Pod{}
-			if err := a.client.Get(ctx, types.NamespacedName{Name: event.InvolvedObject.Name, Namespace: event.InvolvedObject.Namespace}, &pod); err != nil {
-				return nil, err
-			}
-			// TODO:(verify with others) have to do have this check since the 'FailedScheduling' events are not deleted
-			if pod.Spec.NodeName != "" {
-				continue
-			}
-			FailedSchedulingEvents = append(FailedSchedulingEvents, event)
-		}
-	}
-	return FailedSchedulingEvents, nil
 }
 
 func (a *access) ApplyK8sObject(ctx context.Context, k8sObjs ...runtime.Object) error {
@@ -230,65 +216,6 @@ func (a *access) ApplyK8sObject(ctx context.Context, k8sObjs ...runtime.Object) 
 	return nil
 }
 
-func (a *access) CreateNodesTillMax(ctx context.Context, wg *v1beta1.Worker) error {
-	for i := int32(0); i < wg.Maximum; i++ {
-		created, err := a.CreateNodeInWorkerGroup(ctx, wg)
-		if err != nil {
-			return err
-		}
-		if !created {
-			break
-		}
-	}
-	return nil
-}
-
-func (a *access) CreateNodeInWorkerGroup(ctx context.Context, wg *v1beta1.Worker) (bool, error) {
-	//Need an already existing node for node.Status.Allocatable and node.Status.Capacity
-	nodeList := corev1.NodeList{}
-	if err := a.client.List(ctx, &nodeList); err != nil {
-		return false, err
-	}
-
-	var wgNodes []corev1.Node
-	for _, n := range nodeList.Items {
-		if n.Labels["worker.garden.sapcloud.io/group"] == wg.Name {
-			wgNodes = append(wgNodes, n)
-		}
-	}
-
-	if int32(len(wgNodes)) >= wg.Maximum {
-		return false, nil
-	}
-
-	var deployedNode *corev1.Node
-	for _, node := range nodeList.Items {
-		if node.Labels["worker.garden.sapcloud.io/group"] == wg.Name {
-			deployedNode = &node
-		}
-	}
-	if deployedNode == nil {
-		return false, nil
-	}
-	node := corev1.Node{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-", wg.Name),
-			Namespace:    "default",
-			//TODO Change k8s hostname labels
-			Labels: deployedNode.Labels,
-		},
-		Status: corev1.NodeStatus{
-			Allocatable: deployedNode.Status.Allocatable,
-			Capacity:    deployedNode.Status.Capacity,
-			Phase:       corev1.NodeRunning,
-		},
-	}
-	if err := a.client.Create(ctx, &node); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func (a *access) ClearAll(ctx context.Context) (err error) {
 	// kubectl delete all --all
 	var errBuffer bytes.Buffer
@@ -299,6 +226,11 @@ func (a *access) ClearAll(ctx context.Context) (err error) {
 		slog.Error("failed to clear all objects.", "command", delCmd, "stderr", string(errBuffer.Bytes()))
 		return fmt.Errorf("failed to clear objects: %w", err)
 	}
+	err = a.ClearNodes(ctx)
+	if err != nil {
+		return err
+	}
+	<-time.After(2 * time.Second)
 	slog.Info("cleared all objects", "command", delCmd, "stdout", string(out))
 	return
 }
@@ -335,45 +267,6 @@ func (a *access) ClearPods(ctx context.Context) error {
 		}
 	}
 	return nil
-}
-
-func (a *access) GetNodePodAssignments(ctx context.Context) ([]scalesim.NodePodAssignment, error) {
-	nodes, err := a.ListNodes(ctx)
-	if err != nil {
-		return nil, err
-	}
-	assignMap := make(map[string]scalesim.NodePodAssignment)
-	for _, n := range nodes {
-		assignMap[n.Name] = scalesim.NodePodAssignment{
-			NodeName:        n.Name,
-			PoolName:        n.Labels["worker.gardener.cloud/pool"],
-			InstanceType:    n.Labels["node.kubernetes.io/instance-type"],
-			PodNameAndCount: make(map[string]int),
-		}
-	}
-	pods, err := a.ListPods(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, p := range pods {
-		nodeName := p.Spec.NodeName
-		if nodeName == "" {
-			continue
-		}
-		podNameCategory := p.ObjectMeta.GenerateName
-		a := assignMap[nodeName]
-		a.PodNameAndCount[podNameCategory]++
-	}
-	for n, a := range assignMap {
-		if len(a.PodNameAndCount) == 0 {
-			delete(assignMap, n)
-		}
-	}
-	assignments := maps.Values(assignMap)
-	slices.SortFunc(assignments, func(a, b scalesim.NodePodAssignment) int {
-		return cmp.Compare(a.PoolName, b.PoolName)
-	})
-	return assignments, nil
 }
 
 func createKubeconfigFileForRestConfig(restConfig rest.Config) error {
