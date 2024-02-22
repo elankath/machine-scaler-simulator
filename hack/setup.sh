@@ -2,6 +2,7 @@
 set -euo pipefail
 
 declare PROJECT # these are mandatory cli flags to be provided by the user
+declare LANDSCAPE_NAME="dev"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 PROJECT_DIR="$(cd "$(dirname "${SCRIPT_DIR}")" &>/dev/null && pwd)"
 LAUNCH_ENV_FILE="launch.env"
@@ -16,6 +17,7 @@ function create_usage() {
     Usage: $(basename $0) [Options]
     Options:
       -p | --project                    <project-name>                      (Required) Name of the Gardener Project
+      -l | --landscape                  <landscape-name>                    (Optional) Short Name of the landscape. Defaults to dev
     ")
   echo "${usage}"
 }
@@ -26,6 +28,10 @@ function parse_flags() {
     --project | -p)
       shift
       PROJECT="$1"
+      ;;
+    --landscape | -l)
+        shift
+        LANDSCAPE_NAME="$1"
       ;;
     --help | -h)
       shift
@@ -57,7 +63,7 @@ main() {
   parse_flags "$@"
   validate_args
   validate_go_version
-  local GOOS GOARCH binaryAssetsDir kubeSchedulerBinaryUrl launchEnv kubeSchedulerGoMainFile
+  local GOOS GOARCH binaryAssetsDir kubeSchedulerBinaryUrl launchEnv kubeSchedulerGoMainFile landscapeFullName
 
   GOOS=$(go env GOOS)
   GOARCH=$(go env GOARCH)
@@ -120,15 +126,17 @@ main() {
 #  curl -kLO "$kubeSchedulerBinaryUrl"
 #  chmod +x kube-scheduler
 
-  loginCmd="gardenctl target --garden sap-landscape-dev --project $PROJECT"
+  landscapeFullName="sap-landscape-${LANDSCAPE_NAME}"
+  loginCmd="gardenctl target --garden $landscapeFullName  --project $PROJECT"
   printf "Logging via gardenctl: %s\n" "$loginCmd"
   eval "$loginCmd"
   eval "$(gardenctl kubectl-env bash)"
 
   printf "BINARY_ASSETS_DIR=\"%s\"
 GARDEN_PROJECT_NAME=\"%s\"
+GARDEN_LANDSCAPE_NAME=\"%s\"
 GARDENCTL_KUBECONFIG=\"%s\"
-KUBE_SOURCE_DIR=\"%s\"" "$binaryAssetsDir" "$PROJECT" "$KUBECONFIG" "$KUBE_SOURCE_DIR"> "$LAUNCH_ENV_PATH"
+KUBE_SOURCE_DIR=\"%s\"" "$binaryAssetsDir" "$PROJECT" "$landscapeFullName" "$KUBECONFIG" "$KUBE_SOURCE_DIR"> "$LAUNCH_ENV_PATH"
 
 
 

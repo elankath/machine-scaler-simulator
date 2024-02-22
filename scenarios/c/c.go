@@ -48,18 +48,15 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scaleStartTime := time.Now()
-	webutil.Log(w, "Scaling till worker pool max...")
+	webutil.Log(w, "Scenario-Start: Scaling worker pools in virtual cluster till worker pool max...")
 	numCreatedNodes, err := s.engine.ScaleAllWorkerPoolsTillMax(r.Context(), s.Name(), shoot, w)
 	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
-	webutil.Log(w, fmt.Sprintf("Created %d total nodes", numCreatedNodes))
-	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+		webutil.InternalError(w, err)
 		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
 		return
 	}
+	webutil.Log(w, fmt.Sprintf("Created %d total virtual nodes", numCreatedNodes))
 
 	smallCount := webutil.GetIntQueryParam(r, "small", 12) //total = 12x2=24M small
 	largeCount := webutil.GetIntQueryParam(r, "large", 8)  // total = 8*7=56M large

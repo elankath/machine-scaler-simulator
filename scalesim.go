@@ -22,7 +22,7 @@ type Engine interface {
 	SyncVirtualNodesWithShoot(ctx context.Context, shootName string) error
 	ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context, scenarioName string, since time.Time, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
 	ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
-	ScaleWorkerPoolsTillNumZonesxPoolsMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
+	ScaleWorkerPoolsTillNumZonesMultPoolsMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error)
 }
 
 // VirtualClusterAccess represents access to the virtualcluster cluster managed by the simulator that shadows the real cluster

@@ -2,14 +2,15 @@ package d
 
 import (
 	"fmt"
-	scalesim "github.com/elankath/scaler-simulator"
-	"github.com/elankath/scaler-simulator/webutil"
 	"log/slog"
 	"net/http"
+
+	scalesim "github.com/elankath/scaler-simulator"
+	"github.com/elankath/scaler-simulator/webutil"
 )
 
-var shootName = "scenario-c"
-var scenarioName = "C"
+var shootName = "scenario-d"
+var scenarioName = "D"
 
 type scenarioD struct {
 	engine scalesim.Engine

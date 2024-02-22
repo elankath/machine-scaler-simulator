@@ -9,6 +9,7 @@ Scaling Simulator that determines which garden worker pool must be scaled to hos
 1. Ensure you are using Go version `1.22`. Use `go version` to check your version.
 1. Run `./hack/setup.sh`
    1. This will generate a `launch.env` file in the project dir
+   2. Ex: `./hack/setup.sh -l staging -p scalesim` # setups scalesim for sap-landscape-staging and scalesim cluster project
 1. Take a look at generated `launch.env` and change params to your liking if you want.
 1. Source the `launch.env` file using command below (only necessary once in term session)
    1. `set -o allexport && source launch.env && set +o allexport`

@@ -31,6 +31,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	gardenLandscapeName := os.Getenv("GARDEN_LANDSCAPE_NAME")
+	if len(gardenLandscapeName) == 0 {
+		slog.Error("GARDEN_LANDSCAPE_NAME env must be set")
+		os.Exit(1)
+	}
+
 	virtualClusterAccess, err := virtualcluster.InitializeAccess(scheme.Scheme, binaryAssetsDir, map[string]string{
 		//		"secure-port": apiServerPort, <--TODO: this DOESN'T work..ask maddy on envtest port config
 	})
@@ -39,7 +45,7 @@ func main() {
 		os.Exit(3)
 	}
 
-	eng, err := engine.NewEngine(virtualClusterAccess, gardenProjectName)
+	eng, err := engine.NewEngine(virtualClusterAccess, gardenLandscapeName, gardenProjectName)
 	if err != nil {
 		slog.Error("cannot initialize simulator engine", "error", err)
 		os.Exit(4)

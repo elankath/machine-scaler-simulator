@@ -35,16 +35,18 @@ func (s *shootAccess) ShootName() string {
 
 var _ scalesim.ShootAccess = (*shootAccess)(nil)
 
-func InitShootAccess(projectName, shootName string) scalesim.ShootAccess {
+func InitShootAccess(landscapeName, projectName, shootName string) scalesim.ShootAccess {
 	cmdEnv := os.Environ()
 	cmdEnv = append(cmdEnv, fmt.Sprintf("KUBECONFIG=%s", os.Getenv("GARDENCTL_KUBECONFIG")))
 	cmdEnv = append(cmdEnv, "GCTL_SESSION_ID=scalesim")
 
-	shellCmd := fmt.Sprintf("gardenctl target --garden sap-landscape-dev --project %s >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl get shoot %s -oyaml", projectName, shootName)
+	shellCmd := fmt.Sprintf("gardenctl target --garden %s --project %s >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl get shoot %s -oyaml",
+		landscapeName, projectName, shootName)
 	getShootCmd := exec.Command("bash", "-l", "-c", shellCmd)
 	getShootCmd.Env = cmdEnv
 
-	shellCmd = fmt.Sprintf("gardenctl target --garden sap-landscape-dev --project %s --shoot %s >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl get node -oyaml", projectName, shootName)
+	shellCmd = fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl get node -oyaml",
+		landscapeName, projectName, shootName)
 	getNodesCmd := exec.Command("bash", "-l", "-c", shellCmd)
 	getNodesCmd.Env = cmdEnv
 

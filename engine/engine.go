@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/elankath/scaler-simulator/scenarios/d"
-	corev1 "k8s.io/api/core/v1"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/elankath/scaler-simulator/scenarios/d"
 
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 
@@ -23,23 +25,25 @@ import (
 )
 
 type engine struct {
-	virtualAccess     scalesim.VirtualClusterAccess
-	mux               *http.ServeMux
-	mu                sync.Mutex
-	shootAccessMap    map[string]scalesim.ShootAccess
-	gardenProjectName string
+	virtualAccess       scalesim.VirtualClusterAccess
+	mux                 *http.ServeMux
+	mu                  sync.Mutex
+	shootAccessMap      map[string]scalesim.ShootAccess
+	gardenLandscapeName string
+	gardenProjectName   string
 }
 
 var _ scalesim.Engine = (*engine)(nil)
 
-func NewEngine(virtualAccess scalesim.VirtualClusterAccess, gardenProjectName string) (scalesim.Engine, error) {
+func NewEngine(virtualAccess scalesim.VirtualClusterAccess, gardenLandscapeName string, gardenProjectName string) (scalesim.Engine, error) {
 	mux := http.NewServeMux()
 
 	engine := &engine{
-		virtualAccess:     virtualAccess,
-		mux:               mux,
-		gardenProjectName: gardenProjectName,
-		shootAccessMap:    make(map[string]scalesim.ShootAccess),
+		virtualAccess:       virtualAccess,
+		mux:                 mux,
+		gardenLandscapeName: gardenLandscapeName,
+		gardenProjectName:   gardenProjectName,
+		shootAccessMap:      make(map[string]scalesim.ShootAccess),
 	}
 	engine.addRoutes()
 	return engine, nil
@@ -50,7 +54,7 @@ func (e *engine) ShootAccess(shootName string) scalesim.ShootAccess {
 	defer e.mu.Unlock()
 	access, ok := e.shootAccessMap[shootName]
 	if !ok {
-		access = gardenclient.InitShootAccess(e.gardenProjectName, shootName)
+		access = gardenclient.InitShootAccess(e.gardenLandscapeName, e.gardenProjectName, shootName)
 		e.shootAccessMap[shootName] = access
 	}
 	return access
@@ -207,7 +211,7 @@ func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context,
 }
 
 func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
-	webutil.Log(w, "Scaling worker pools til max for scenario: "+scenarioName)
+	webutil.Log(w, "Scaling virtual cluster worker pools till max for scenario: "+scenarioName)
 	totalNodesCreated := 0
 	for _, pool := range shoot.Spec.Provider.Workers {
 		//e.virtualAccess.ListNodes(ctx)
@@ -215,7 +219,7 @@ func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName st
 		if err != nil {
 			return totalNodesCreated, err
 		}
-		webutil.Log(w, fmt.Sprintf("Created nodes in pool %q till max %d", pool.Name, pool.Maximum))
+		webutil.Log(w, fmt.Sprintf("Created virtual nodes in pool: %q till max: %d", pool.Name, pool.Maximum))
 		if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
 			return totalNodesCreated, err
 		}
@@ -224,15 +228,15 @@ func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName st
 	return totalNodesCreated, nil
 }
 
-func (e *engine) ScaleWorkerPoolsTillNumZonesxPoolsMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
-	webutil.Log(w, "Scaling worker pools til zone*pool max for scenario: "+scenarioName)
+func (e *engine) ScaleWorkerPoolsTillNumZonesMultPoolsMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
+	webutil.Log(w, "Scaling virtual cluster worker pools til zone*pool max for scenario: "+scenarioName)
 	totalNodesCreated := 0
 	for _, pool := range shoot.Spec.Provider.Workers {
 		err := simutil.CreateNodesTillZonexPoolMax(ctx, e.virtualAccess, shoot.Spec.Region, &pool)
 		if err != nil {
 			return totalNodesCreated, err
 		}
-		webutil.Log(w, fmt.Sprintf("Created nodes in pool %q till max %d", pool.Name, pool.Maximum))
+		webutil.Log(w, fmt.Sprintf("Created virtual nodes in pool %q till max %d", pool.Name, pool.Maximum))
 		if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
 			return totalNodesCreated, err
 		}
