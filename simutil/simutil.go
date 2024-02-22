@@ -81,6 +81,7 @@ func GetNodePodAssignments(ctx context.Context, a scalesim.VirtualClusterAccess)
 	for _, n := range nodes {
 		assignMap[n.Name] = scalesim.NodePodAssignment{
 			NodeName:        n.Name,
+			ZoneName:        n.Labels["topology.kubernetes.io/zone"],
 			PoolName:        n.Labels["worker.gardener.cloud/pool"],
 			InstanceType:    n.Labels["node.kubernetes.io/instance-type"],
 			PodNameAndCount: make(map[string]int),
@@ -124,9 +125,10 @@ func CreateNodeInWorkerGroupForZone(ctx context.Context, a scalesim.VirtualClust
 		}
 	}
 
-	if int32(len(wgNodes)) >= wg.Maximum {
-		return false, nil
-	}
+	//TODO: Change this to use the zone and region labels
+	//if int32(len(wgNodes)) >= wg.Maximum {
+	//	return false, nil
+	//}
 
 	var deployedNode *corev1.Node
 	for _, node := range wgNodes {

@@ -88,6 +88,7 @@ type Scenario interface {
 
 type NodePodAssignment struct {
 	NodeName        string
+	ZoneName        string
 	PoolName        string
 	InstanceType    string
 	PodNameAndCount map[string]int
@@ -95,7 +96,7 @@ type NodePodAssignment struct {
 
 func (n NodePodAssignment) String() string {
 	var sb strings.Builder
-	sb.WriteString("(Node: " + n.NodeName + ", PoolName: " + n.PoolName + ", InstanceType: " + n.InstanceType + ", PodAssignments: ")
+	sb.WriteString("(Node: " + n.NodeName + " ,Zone: " + n.ZoneName + ", PoolName: " + n.PoolName + ", InstanceType: " + n.InstanceType + ", PodAssignments: ")
 	for k, v := range n.PodNameAndCount {
 		sb.WriteString("[")
 		sb.WriteString(k + ":" + strconv.Itoa(v))
