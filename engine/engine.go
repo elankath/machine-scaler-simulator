@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/elankath/scaler-simulator/scenarios/p"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -81,6 +82,9 @@ func (e *engine) addRoutes() {
 
 	scenarioD := d.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioD.Name(), scenarioD)
+
+	scenarioP := p.New(e)
+	e.mux.Handle("POST /scenarios/"+scenarioP.Name(), scenarioP)
 
 }
 
@@ -215,7 +219,7 @@ func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName st
 	totalNodesCreated := 0
 	for _, pool := range shoot.Spec.Provider.Workers {
 		//e.virtualAccess.ListNodes(ctx)
-		err := simutil.CreateNodesTillPoolMax(ctx, e.virtualAccess, &pool)
+		numNodesCreated, err := simutil.CreateNodesTillPoolMax(ctx, e.virtualAccess, &pool)
 		if err != nil {
 			return totalNodesCreated, err
 		}
@@ -223,7 +227,7 @@ func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName st
 		if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
 			return totalNodesCreated, err
 		}
-		totalNodesCreated += int(pool.Maximum)
+		totalNodesCreated += numNodesCreated
 	}
 	return totalNodesCreated, nil
 }
@@ -243,4 +247,17 @@ func (e *engine) ScaleWorkerPoolsTillNumZonesMultPoolsMax(ctx context.Context, s
 		totalNodesCreated += len(pool.Zones) * (int)(pool.Maximum)
 	}
 	return totalNodesCreated, nil
+}
+
+func (e *engine) ScaleWorkerPoolTillMax(ctx context.Context, scenarioName string, pool *gardencore.Worker, w http.ResponseWriter) (int, error) {
+	webutil.Log(w, "Scaling virtual cluster worker pool: "+pool.Name+" till pool max for scenario: "+scenarioName)
+	numNodesCreated, err := simutil.CreateNodesTillPoolMax(ctx, e.virtualAccess, pool)
+	if err != nil {
+		return numNodesCreated, err
+	}
+	webutil.Log(w, fmt.Sprintf("Created virtual nodes in pool: %q till max: %d", pool.Name, pool.Maximum))
+	if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
+		return numNodesCreated, err
+	}
+	return numNodesCreated, nil
 }

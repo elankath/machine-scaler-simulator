@@ -82,6 +82,7 @@ main() {
     printf "Downloading k8s source tarball from %s\n" "$K8S_SRC_TAR_URL"
     curl -kL $K8S_SRC_TAR_URL -o /tmp/kubernetes.tar.gz
     tar -zxf kubernetes.tar.gz
+    # TODO: make sure to create the directory under GOPATH if not present.
     mv /tmp/kubernetes-1.29.1/ $KUBE_SOURCE_DIR
     popd > /dev/null
 

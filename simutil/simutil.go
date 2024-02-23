@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"github.com/elankath/scaler-simulator/webutil"
 	"log/slog"
+	"net/http"
 	"slices"
 	"time"
 
@@ -47,6 +49,31 @@ func GetFailedSchedulingEvents(ctx context.Context, a scalesim.VirtualClusterAcc
 	return failedSchedulingEvents, nil
 }
 
+func PrintScheduledPodEvents(ctx context.Context, a scalesim.VirtualClusterAccess, since time.Time, w http.ResponseWriter) error {
+	events, err := a.ListEvents(ctx)
+	if err != nil {
+		slog.Error("cannot list events", "error", err)
+		return err
+	}
+	slices.SortFunc(events, func(a, b corev1.Event) int {
+		return cmp.Compare(a.EventTime.UnixMicro(), b.EventTime.Time.UnixMicro())
+	})
+	for _, event := range events {
+		sinceTime := metav1.NewTime(since)
+		if event.EventTime.BeforeTime(&sinceTime) {
+			continue
+		}
+		if event.Reason == "Scheduled" { //TODO: find if there a constant for 'FailedScheduling'
+			pod, err := a.GetPod(ctx, types.NamespacedName{Name: event.InvolvedObject.Name, Namespace: event.InvolvedObject.Namespace})
+			if err != nil {
+				return err
+			}
+			webutil.Log(w, fmt.Sprintf("Pod %s is scheduled on Node %s at time %s", pod.Name, pod.Spec.NodeName, event.EventTime.Time))
+		}
+	}
+	return nil
+}
+
 func WaitTillNoUnscheduledPodsOrTimeout(ctx context.Context, access scalesim.VirtualClusterAccess, timeout time.Duration, since time.Time) error {
 	pollSecs := 2
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -70,6 +97,21 @@ func WaitTillNoUnscheduledPodsOrTimeout(ctx context.Context, access scalesim.Vir
 			<-time.After(time.Duration(pollSecs) * time.Second)
 		}
 	}
+}
+
+func WaitAndGetUnscheduledPodCount(ctx context.Context, access scalesim.VirtualClusterAccess, waitSec int) (int, error) {
+	<-time.After(time.Duration(waitSec) * time.Second)
+	unscheduledPodCount := 0
+	pods, err := access.ListPods(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, pod := range pods {
+		if pod.Spec.NodeName == "" {
+			unscheduledPodCount++
+		}
+	}
+	return unscheduledPodCount, err
 }
 
 func GetNodePodAssignments(ctx context.Context, a scalesim.VirtualClusterAccess) ([]scalesim.NodePodAssignment, error) {
@@ -211,20 +253,22 @@ func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAcces
 }
 
 // CreateNodesTillPoolMax creates sample nodes in the given worker pool till the worker pool max is reached.
-func CreateNodesTillPoolMax(ctx context.Context, a scalesim.VirtualClusterAccess, wg *v1beta1.Worker) error {
+func CreateNodesTillPoolMax(ctx context.Context, a scalesim.VirtualClusterAccess, wg *v1beta1.Worker) (int, error) {
+	totalNodesCreated := 0
 	for i := int32(0); i < wg.Maximum; i++ {
 		created, err := CreateNodeInWorkerGroup(ctx, a, wg)
 		if err != nil {
-			return err
+			return totalNodesCreated, err
 		}
 		if !created {
 			break
 		}
+		totalNodesCreated++
 	}
-	return nil
+	return totalNodesCreated, nil
 }
 
-// CreateNodesTillMax creates sample nodes in the given worker pool till the worker pool max is reached.
+// CreateNodesTillZonexPoolMax creates sample nodes in the given worker pool till the worker pool max is reached.
 func CreateNodesTillZonexPoolMax(ctx context.Context, a scalesim.VirtualClusterAccess, region string, wg *v1beta1.Worker) error {
 	for _, zone := range wg.Zones {
 		for i := int32(0); i < wg.Maximum; i++ {

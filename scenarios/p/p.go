@@ -1,33 +1,42 @@
-package c
+package p
 
 import (
 	"fmt"
-	"log/slog"
-	"net/http"
-	"time"
-
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/simutil"
 	"github.com/elankath/scaler-simulator/webutil"
+	"log/slog"
+	"net/http"
+	"time"
 )
 
-var shootName = "scenario-c"
-var scenarioName = "C"
+var shootName = "scenario-p"
+var scenarioName = "P"
 
-type scenarioC struct {
+type scenarioP struct {
 	engine scalesim.Engine
 }
 
+func (s *scenarioP) Description() string {
+	return "Scenario P tests scaleup of worker pools based on declaration based priority."
+}
+
+func (s *scenarioP) Name() string {
+	return scenarioName
+}
+
+func (s *scenarioP) ShootName() string {
+	return shootName
+}
+
 func New(engine scalesim.Engine) scalesim.Scenario {
-	return &scenarioC{
+	return &scenarioP{
 		engine: engine,
 	}
 }
 
-// Scenario C will first scale up nodes in all worker pools of scenario-c shoot to MAX
-// Then deploy Pods small and large according to count.
-// Then wait till all Pods are scheduled or till timeout.
-func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// Scenario P tests scaling of worker pools based on priority. The assumption is the pool declared first in the shoot has the higher priority
+func (s *scenarioP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	webutil.Log(w, "Commencing scenario: "+s.Name()+"...")
 	webutil.Log(w, "Clearing virtual cluster..")
 	err := s.engine.VirtualClusterAccess().ClearAll(r.Context())
@@ -47,42 +56,58 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	podSpecPath := "scenarios/p/podA.yaml"
+	podCount := webutil.GetIntQueryParam(r, "podA", 2)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, podCount))
+	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, podCount)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+
+	webutil.Log(w, fmt.Sprintf("Deployed %d PodAs..wait for scheduler to sync...", podCount))
+
+	podSpecPath = "scenarios/p/podB.yaml"
+	podCount = webutil.GetIntQueryParam(r, "podB", 4)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, podCount))
+	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, podCount)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+
+	webutil.Log(w, fmt.Sprintf("Deployed %d PodBs..wait for scheduler to sync...", podCount))
+
 	scaleStartTime := time.Now()
-	webutil.Log(w, "Scenario-Start: Scaling worker pools in virtual cluster till worker pool max...")
-	numCreatedNodes, err := s.engine.ScaleAllWorkerPoolsTillMax(r.Context(), s.Name(), shoot, w)
-	if err != nil {
-		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
-		webutil.InternalError(w, err)
-		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
-		return
-	}
-	webutil.Log(w, fmt.Sprintf("Created %d total virtual nodes", numCreatedNodes))
 
-	smallCount := webutil.GetIntQueryParam(r, "small", 12)
-	largeCount := webutil.GetIntQueryParam(r, "large", 8)
-
-	podSpecPath := "scenarios/c/podSmall.yaml"
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
-	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, smallCount))
-	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, smallCount)
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
+	for _, pool := range shoot.Spec.Provider.Workers {
+		numCreatedNodes, err := s.engine.ScaleWorkerPoolTillMax(r.Context(), s.Name(), &pool, w)
+		if err != nil {
+			webutil.InternalError(w, err)
+			return
+		}
+		webutil.Log(w, fmt.Sprintf("Created %d total nodes", numCreatedNodes))
+		count, err := simutil.WaitAndGetUnscheduledPodCount(r.Context(), s.engine.VirtualClusterAccess(), 8)
+		if err != nil {
+			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+			slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+		}
+		if count == 0 {
+			webutil.Log(w, "All pods Scheduled!!")
+			break
+		}
+		webutil.Log(w, fmt.Sprintf("Unscheduled pod count: %d after scaling pool %s, continuing with scale up of next worker pool", count, pool.Name))
 	}
 
-	podSpecPath = "scenarios/c/podLarge.yaml"
-	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, largeCount))
-	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, largeCount)
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
-	webutil.Log(w, fmt.Sprintf("Deployed %d Pods..wait for scheduler to sync...", smallCount+largeCount))
-
-	timeoutSecs := 30 * time.Second
+	timeoutSecs := 3 * time.Second
 	webutil.Logf(w, "Waiting till there are no unschedulable pods or timeout of %.2f secs", timeoutSecs.Seconds())
 	err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs, scaleStartTime)
 	if err != nil { // TODO: too much repetition move this to scenarios as utility function
@@ -109,23 +134,9 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	webutil.Log(w, fmt.Sprintf("Scenario-%s Completed!", s.Name()))
+	webutil.Log(w, fmt.Sprintf("Scenario-%s completed", s.Name()))
 	webutil.LogNodePodAssignments(w, s.Name(), nodePodAssignments)
 	slog.Info("Execution of scenario " + s.Name() + " completed!")
 	webutil.Log(w, "Recommendation for Scaleup: "+recommendation.String())
 
-}
-
-var _ scalesim.Scenario = (*scenarioC)(nil)
-
-func (s scenarioC) Description() string {
-	return "Scale 2 Worker Pool with machine type m5.large, m5.2xlarge with replicas of small and large pods"
-}
-
-func (s scenarioC) ShootName() string {
-	return shootName
-}
-
-func (s scenarioC) Name() string {
-	return scenarioName
 }
