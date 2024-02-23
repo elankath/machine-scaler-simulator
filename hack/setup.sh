@@ -68,6 +68,8 @@ main() {
   GOOS=$(go env GOOS)
   GOARCH=$(go env GOARCH)
   printf "GOOS=%s, GOARCH=%s\n" $GOOS $GOARCH
+  printf "Installing air for live reload...\n"
+  go install github.com/cosmtrek/air@latest
   printf "Installing setup-envtest...\n"
   go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
   envTestSetupCmd="setup-envtest --os $GOOS --arch $GOARCH use  -p path"
