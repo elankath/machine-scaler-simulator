@@ -3,6 +3,7 @@ module github.com/elankath/scaler-simulator
 go 1.22.0
 
 require (
+	github.com/gardener/machine-controller-manager v0.50.0
 	golang.org/x/exp v0.0.0-20230321023759-10a507213a29
 	k8s.io/apimachinery v0.29.1
 	k8s.io/client-go v0.29.1

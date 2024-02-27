@@ -3,6 +3,7 @@ package gardenclient
 import (
 	"errors"
 	"fmt"
+	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -15,10 +16,14 @@ import (
 )
 
 type shootAccess struct {
-	projectName string
-	shootName   string
-	getShootCmd *exec.Cmd
-	getNodesCmd *exec.Cmd
+	landscapeName string
+	projectName   string
+	shootName     string
+	getShootCmd   *exec.Cmd
+	getNodesCmd   *exec.Cmd
+	getMCDCmd     *exec.Cmd
+	getPodsCmd    *exec.Cmd
+	applyPodsCmd  *exec.Cmd
 	////shoot
 	//shoot *gardencore.Shoot
 	////Nodes
@@ -50,11 +55,24 @@ func InitShootAccess(landscapeName, projectName, shootName string) scalesim.Shoo
 	getNodesCmd := exec.Command("bash", "-l", "-c", shellCmd)
 	getNodesCmd.Env = cmdEnv
 
+	shellCmd = fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s --control-plane >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl get mcd -oyaml",
+		landscapeName, projectName, shootName)
+	getMCDCmd := exec.Command("bash", "-l", "-c", shellCmd)
+	getMCDCmd.Env = cmdEnv
+
+	shellCmd = fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s  >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl get pod -oyaml",
+		landscapeName, projectName, shootName)
+	getPodsCmd := exec.Command("bash", "-l", "-c", shellCmd)
+	getMCDCmd.Env = cmdEnv
+
 	return &shootAccess{
-		projectName: projectName,
-		shootName:   shootName,
-		getShootCmd: getShootCmd,
-		getNodesCmd: getNodesCmd,
+		landscapeName: landscapeName,
+		projectName:   projectName,
+		shootName:     shootName,
+		getShootCmd:   getShootCmd,
+		getNodesCmd:   getNodesCmd,
+		getMCDCmd:     getMCDCmd,
+		getPodsCmd:    getPodsCmd,
 	}
 }
 
@@ -74,6 +92,7 @@ func (s *shootAccess) GetShootObj() (*gardencore.Shoot, error) {
 func (s *shootAccess) clearCommands() {
 	reset(s.getNodesCmd)
 	reset(s.getShootCmd)
+	reset(s.getMCDCmd)
 }
 
 func reset(c *exec.Cmd) {
@@ -83,7 +102,7 @@ func reset(c *exec.Cmd) {
 	c.ProcessState = nil
 	c.SysProcAttr = nil
 }
-func (s *shootAccess) GetNodes() ([]corev1.Node, error) {
+func (s *shootAccess) GetNodes() ([]*corev1.Node, error) {
 	s.clearCommands()
 	slog.Info("shootAccess.GetNodes().", "command", s.getNodesCmd.String())
 	cmdOutput, err := s.getNodesCmd.Output()
@@ -93,5 +112,84 @@ func (s *shootAccess) GetNodes() ([]corev1.Node, error) {
 		slog.Error("cannot get shoot nodes", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
 		return nil, err
 	}
-	return serutil.DecodeNodeList(cmdOutput)
+	return serutil.DecodeList[*corev1.Node](cmdOutput)
+}
+
+func (s *shootAccess) GetMachineDeployments() ([]*machinev1alpha1.MachineDeployment, error) {
+	s.clearCommands()
+	slog.Info("shootAccess.GetMachineDeployments().", "command", s.getMCDCmd.String())
+	cmdOutput, err := s.getMCDCmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		errors.As(err, &exitErr)
+		slog.Error("cannot get mcd", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
+		return nil, err
+	}
+	return serutil.DecodeList[*machinev1alpha1.MachineDeployment](cmdOutput)
+}
+
+func (s *shootAccess) ScaleMachineDeployment(machineDeploymentName string, replicas int32) error {
+	cmdEnv := os.Environ()
+	cmdEnv = append(cmdEnv, fmt.Sprintf("KUBECONFIG=%s", os.Getenv("GARDENCTL_KUBECONFIG")))
+	cmdEnv = append(cmdEnv, "GCTL_SESSION_ID=scalesim")
+
+	shellCmd := fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s --control-plane >&2  && eval $(gardenctl kubectl-env bash) && kubectl scale machinedeployment %s --replicas=%d",
+		s.landscapeName, s.projectName, s.shootName, machineDeploymentName, replicas)
+	scaleMachineDeployment := exec.Command("bash", "-l", "-c", shellCmd)
+	scaleMachineDeployment.Env = cmdEnv
+	cmdOutput, err := scaleMachineDeployment.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		errors.As(err, &exitErr)
+		slog.Error("cannot scale mcd object", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
+		return err
+	}
+	return nil
+}
+
+func (s *shootAccess) getPods() ([]*corev1.Pod, error) {
+	s.clearCommands()
+	slog.Info("shootAccess.getPods().", "command", s.getPodsCmd.String())
+	cmdOutput, err := s.getPodsCmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		errors.As(err, &exitErr)
+		slog.Error("cannot get shoot pods in the default namespace", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
+		return nil, err
+	}
+	return serutil.DecodeList[*corev1.Pod](cmdOutput)
+}
+
+func (s *shootAccess) GetUnscheduledPods() ([]corev1.Pod, error) {
+	pods, err := s.getPods()
+	if err != nil {
+		return nil, err
+	}
+	var unscheduledPods []corev1.Pod
+	for _, pod := range pods {
+		if pod.Spec.NodeName == "" {
+			unscheduledPods = append(unscheduledPods, *pod)
+		}
+	}
+	return unscheduledPods, nil
+}
+
+func (s *shootAccess) CreatePods(filePath string, replicas int) error {
+	for i := 0; i < replicas; i++ {
+		cmdEnv := os.Environ()
+		cmdEnv = append(cmdEnv, fmt.Sprintf("KUBECONFIG=%s", os.Getenv("GARDENCTL_KUBECONFIG")))
+		cmdEnv = append(cmdEnv, "GCTL_SESSION_ID=scalesim")
+		shellCmd := fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s  >&2  && eval $(gardenctl kubectl-env bash) && kubectl create -f %s",
+			s.landscapeName, s.projectName, s.shootName, filePath)
+		scaleMachineDeployment := exec.Command("bash", "-l", "-c", shellCmd)
+		scaleMachineDeployment.Env = cmdEnv
+		cmdOutput, err := scaleMachineDeployment.Output()
+		if err != nil {
+			var exitErr *exec.ExitError
+			errors.As(err, &exitErr)
+			slog.Error("cannot scale mcd object", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
+			return err
+		}
+	}
+	return nil
 }

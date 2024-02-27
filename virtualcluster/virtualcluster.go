@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -37,7 +38,15 @@ var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implement
 
 func (a *access) CreatePods(ctx context.Context, pods ...corev1.Pod) error {
 	for _, pod := range pods {
-		err := a.client.Create(ctx, &pod)
+		dupPod := corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+			},
+			Spec: pod.Spec,
+		}
+
+		err := a.client.Create(ctx, &dupPod)
 		if err != nil {
 			slog.Error("Error creating the pod.", "error", err)
 			return err
@@ -127,11 +136,11 @@ func (a *access) Shutdown() {
 	return
 }
 
-func (a *access) AddNodes(ctx context.Context, nodes ...corev1.Node) error {
+func (a *access) AddNodes(ctx context.Context, nodes ...*corev1.Node) error {
 	for _, n := range nodes {
 		n.ObjectMeta.ResourceVersion = ""
 		n.ObjectMeta.UID = ""
-		err := a.client.Create(ctx, &n)
+		err := a.client.Create(ctx, n)
 		if err != nil {
 			return err
 		}

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -21,6 +22,7 @@ func init() {
 	configScheme := runtime.NewScheme()
 	utilruntime.Must(gardencore.AddToScheme(configScheme))
 	utilruntime.Must(corev1.AddToScheme(configScheme))
+	utilruntime.Must(machinev1alpha1.AddToScheme(configScheme))
 	ser := json.NewSerializerWithOptions(json.DefaultMetaFactory, configScheme, configScheme, json.SerializerOptions{
 		Yaml:   true,
 		Pretty: false,
@@ -29,6 +31,7 @@ func init() {
 	versions := schema.GroupVersions([]schema.GroupVersion{
 		gardencore.SchemeGroupVersion,
 		corev1.SchemeGroupVersion,
+		machinev1alpha1.SchemeGroupVersion,
 	})
 	codec = serializer.NewCodecFactory(configScheme).CodecForVersions(ser, ser, versions, versions)
 	workingDir, err := os.Getwd()
@@ -77,27 +80,27 @@ func DecodeShoot(bytes []byte) (*gardencore.Shoot, error) {
 	return shoot, nil
 }
 
-func DecodeNodeList(bytes []byte) ([]corev1.Node, error) { //TODO: this is inefficient, fix later.
+func DecodeList[T runtime.Object](bytes []byte) ([]T, error) { //TODO: this is inefficient, fix later.
 	obj, err := runtime.Decode(codec, bytes)
 	if err != nil {
-		slog.Error("cannot decode as node list", "error", err)
+		slog.Error("cannot decode as list", "error", err)
 		return nil, err
 	}
 	var list *corev1.List
-	var nodes []corev1.Node
+	var items []T
 	list = obj.(*corev1.List)
 	for _, item := range list.Items {
-		var node *corev1.Node
+		var itemObj T
 		bytes := item.Raw
 		decodedObj, err := runtime.Decode(codec, bytes)
 		if err != nil {
 			slog.Error("cannot decode node", "error", err)
 			return nil, err
 		}
-		node = decodedObj.(*corev1.Node)
-		nodes = append(nodes, *node)
+		itemObj = decodedObj.(T)
+		items = append(items, itemObj)
 	}
-	return nodes, nil
+	return items, nil
 }
 
 func ReadPod(projRelPath string) (corev1.Pod, error) {
