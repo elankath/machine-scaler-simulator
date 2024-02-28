@@ -3,6 +3,7 @@ package a
 import (
 	"fmt"
 	"github.com/elankath/scaler-simulator/scaleutil"
+	"github.com/elankath/scaler-simulator/virtualcluster"
 	"log/slog"
 	"net/http"
 	"os"
@@ -77,7 +78,7 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(unscheduledPods) != 0 {
-		err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), unscheduledPods...)
+		err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), virtualcluster.BinPackingSchedulerName, unscheduledPods...)
 		if err != nil {
 			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 			slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
