@@ -198,7 +198,7 @@ func CreateNodeInWorkerGroupForZone(ctx context.Context, a scalesim.VirtualClust
 	node.Labels["topology.kubernetes.io/zone"] = zone
 	node.Labels["topology.kubernetes.io/region"] = region
 	delete(node.Labels, "app.kubernetes.io/existing-node")
-	if err := a.AddNodes(ctx, node); err != nil {
+	if err := a.AddNodes(ctx, &node); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -246,7 +246,7 @@ func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAcces
 		},
 	}
 	delete(node.Labels, "app.kubernetes.io/existing-node")
-	if err := a.AddNodes(ctx, node); err != nil {
+	if err := a.AddNodes(ctx, &node); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -305,7 +305,8 @@ func GetScalerRecommendation(ctx context.Context, a scalesim.VirtualClusterAcces
 			continue
 		}
 		if len(assignment.PodNameAndCount) > 0 {
-			recommendation[assignment.PoolName]++
+			key := fmt.Sprintf("%s/%s", assignment.PoolName, assignment.ZoneName)
+			recommendation[key]++
 		}
 	}
 

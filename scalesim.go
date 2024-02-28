@@ -3,6 +3,7 @@ package scalesim
 
 import (
 	"context"
+	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 	"net/http"
 	"strconv"
 	"strings"
@@ -32,13 +33,13 @@ type VirtualClusterAccess interface {
 	KubeConfigPath() string
 
 	// AddNodes adds the given slice of k8s Nodes to the virtual cluster
-	AddNodes(context.Context, ...corev1.Node) error
+	AddNodes(context.Context, ...*corev1.Node) error
 
 	// RemoveTaintFromVirtualNodes removed the NoSchedule taint from all nodes in the virtual cluster
 	RemoveTaintFromVirtualNodes(context.Context) error
 
 	// CreatePods creates the given slice of k8s Pods in the virtual cluster
-	CreatePods(context.Context, ...corev1.Pod) error
+	CreatePods(context.Context, string, ...corev1.Pod) error
 
 	// CreatePodsFromYaml loads the pod yaml at the given podYamlPath and creates Pods for given number of replicas.
 	CreatePodsFromYaml(ctx context.Context, podYamlPath string, replicas int) error
@@ -74,7 +75,19 @@ type ShootAccess interface {
 	GetShootObj() (*gardencore.Shoot, error)
 
 	// GetNodes returns slice of nodes of the shoot cluster
-	GetNodes() ([]corev1.Node, error)
+	GetNodes() ([]*corev1.Node, error)
+
+	// GetUnscheduledPods returns slice of unscheduled pods of the shoot cluster
+	GetUnscheduledPods() ([]corev1.Pod, error)
+
+	// GetMachineDeployments returns slice of machine deployments of the shoot cluster
+	GetMachineDeployments() ([]*machinev1alpha1.MachineDeployment, error)
+
+	// ScaleMachineDeployment scales the given machine deployment to the given number of replicas
+	ScaleMachineDeployment(machineDeploymentName string, replicas int32) error
+
+	// CreatePods creates the given slice of k8s Pods in the shoot cluster
+	CreatePods(filePath string, replicas int) error
 }
 
 // Scenario represents a scaling simulation scenario. Each scenario is invocable by an HTTP endpoint and hence extends http.Handler

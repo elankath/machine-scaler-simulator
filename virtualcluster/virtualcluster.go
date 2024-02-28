@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -26,6 +27,8 @@ import (
 
 var kubeConfigPath = "/tmp/scalesim-kubeconfig.yaml"
 
+const BinPackingSchedulerName = "bin-packing-scheduler"
+
 type access struct {
 	client               client.Client
 	restConfig           *rest.Config
@@ -35,9 +38,17 @@ type access struct {
 
 var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implements I.
 
-func (a *access) CreatePods(ctx context.Context, pods ...corev1.Pod) error {
+func (a *access) CreatePods(ctx context.Context, schedulerName string, pods ...corev1.Pod) error {
 	for _, pod := range pods {
-		err := a.client.Create(ctx, &pod)
+		dupPod := corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      pod.Name,
+				Namespace: pod.Namespace,
+			},
+			Spec: pod.Spec,
+		}
+		dupPod.Spec.SchedulerName = schedulerName
+		err := a.client.Create(ctx, &dupPod)
 		if err != nil {
 			slog.Error("Error creating the pod.", "error", err)
 			return err
@@ -52,7 +63,7 @@ func (a *access) CreatePodsFromYaml(ctx context.Context, podYamlPath string, rep
 		return fmt.Errorf("cannot read pod spec %q: %w", podYamlPath, err)
 	}
 	for i := 0; i < replicas; i++ {
-		err = a.CreatePods(ctx, pod)
+		err = a.CreatePods(ctx, BinPackingSchedulerName, pod)
 		if err != nil {
 			return fmt.Errorf("cannot create replica %d of pod spec %q: %w", i, podYamlPath, err)
 		}
@@ -127,11 +138,11 @@ func (a *access) Shutdown() {
 	return
 }
 
-func (a *access) AddNodes(ctx context.Context, nodes ...corev1.Node) error {
+func (a *access) AddNodes(ctx context.Context, nodes ...*corev1.Node) error {
 	for _, n := range nodes {
 		n.ObjectMeta.ResourceVersion = ""
 		n.ObjectMeta.UID = ""
-		err := a.client.Create(ctx, &n)
+		err := a.client.Create(ctx, n)
 		if err != nil {
 			return err
 		}

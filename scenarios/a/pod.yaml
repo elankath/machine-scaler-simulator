@@ -7,7 +7,6 @@ metadata:
     app.kubernetes.io/name: "scenario-a"
 
 spec:
-  schedulerName: bin-packing-scheduler
   terminationGracePeriodSeconds: 0
   containers:
     - name: pause
