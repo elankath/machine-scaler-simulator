@@ -3,10 +3,11 @@ package gardenclient
 import (
 	"errors"
 	"fmt"
-	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 	"log/slog"
 	"os"
 	"os/exec"
+
+	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -16,14 +17,17 @@ import (
 )
 
 type shootAccess struct {
-	landscapeName string
-	projectName   string
-	shootName     string
-	getShootCmd   *exec.Cmd
-	getNodesCmd   *exec.Cmd
-	getMCDCmd     *exec.Cmd
-	getPodsCmd    *exec.Cmd
-	applyPodsCmd  *exec.Cmd
+	landscapeName    string
+	projectName      string
+	shootName        string
+	getShootCmd      *exec.Cmd
+	getNodesCmd      *exec.Cmd
+	getMCDCmd        *exec.Cmd
+	getPodsCmd       *exec.Cmd
+	applyPodsCmd     *exec.Cmd
+	taintNodesCmd    *exec.Cmd
+	untaintNodesCmd  *exec.Cmd
+	deleteAllPodsCmd *exec.Cmd
 	////shoot
 	//shoot *gardencore.Shoot
 	////Nodes
@@ -63,16 +67,34 @@ func InitShootAccess(landscapeName, projectName, shootName string) scalesim.Shoo
 	shellCmd = fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s  >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl get pod -oyaml",
 		landscapeName, projectName, shootName)
 	getPodsCmd := exec.Command("bash", "-l", "-c", shellCmd)
-	getMCDCmd.Env = cmdEnv
+	getPodsCmd.Env = cmdEnv
+
+	shellCmd = fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s  >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl taint nodes --all scaleSim:NoSchedule",
+		landscapeName, projectName, shootName)
+	taintNodesCmd := exec.Command("bash", "-l", "-c", shellCmd)
+	taintNodesCmd.Env = cmdEnv
+
+	shellCmd = fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s  >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl taint nodes --all scaleSim:NoSchedule-",
+		landscapeName, projectName, shootName)
+	untaintNodesCmd := exec.Command("bash", "-l", "-c", shellCmd)
+	untaintNodesCmd.Env = cmdEnv
+
+	shellCmd = fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s  >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl delete pods --all",
+		landscapeName, projectName, shootName)
+	deleteAllPodsCmd := exec.Command("bash", "-l", "-c", shellCmd)
+	deleteAllPodsCmd.Env = cmdEnv
 
 	return &shootAccess{
-		landscapeName: landscapeName,
-		projectName:   projectName,
-		shootName:     shootName,
-		getShootCmd:   getShootCmd,
-		getNodesCmd:   getNodesCmd,
-		getMCDCmd:     getMCDCmd,
-		getPodsCmd:    getPodsCmd,
+		landscapeName:    landscapeName,
+		projectName:      projectName,
+		shootName:        shootName,
+		getShootCmd:      getShootCmd,
+		getNodesCmd:      getNodesCmd,
+		getMCDCmd:        getMCDCmd,
+		getPodsCmd:       getPodsCmd,
+		taintNodesCmd:    taintNodesCmd,
+		untaintNodesCmd:  untaintNodesCmd,
+		deleteAllPodsCmd: deleteAllPodsCmd,
 	}
 }
 
@@ -192,4 +214,52 @@ func (s *shootAccess) CreatePods(filePath string, replicas int) error {
 		}
 	}
 	return nil
+}
+
+func (s *shootAccess) TaintNodes() error {
+	s.clearCommands()
+	slog.Info("shootAccess.TaintExistingNodes().", "command", s.taintNodesCmd.String())
+	cmdOutput, err := s.taintNodesCmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		errors.As(err, &exitErr)
+		slog.Error("cannot taint shoot nodes", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
+		return err
+	}
+	return nil
+}
+
+func (s *shootAccess) UntaintNodes() error {
+	s.clearCommands()
+	slog.Info("shootAccess.UntaintExistingNodes().", "command", s.untaintNodesCmd.String())
+	cmdOutput, err := s.untaintNodesCmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		errors.As(err, &exitErr)
+		slog.Error("cannot untaint shoot nodes", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
+		return err
+	}
+	return nil
+}
+
+func (s *shootAccess) DeleteAllPods() error {
+	s.clearCommands()
+	slog.Info("shootAccess.DeleteAllPods().", "command", s.deleteAllPodsCmd.String())
+	cmdOutput, err := s.deleteAllPodsCmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		errors.As(err, &exitErr)
+		slog.Error("cannot delete all pods in the shoot", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
+		return err
+	}
+	return nil
+}
+
+func (s *shootAccess) CleanUp() error {
+	err := s.DeleteAllPods()
+	if err != nil {
+		return err
+	}
+
+	return s.UntaintNodes()
 }

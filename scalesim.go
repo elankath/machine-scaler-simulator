@@ -3,11 +3,12 @@ package scalesim
 
 import (
 	"context"
-	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -88,6 +89,14 @@ type ShootAccess interface {
 
 	// CreatePods creates the given slice of k8s Pods in the shoot cluster
 	CreatePods(filePath string, replicas int) error
+
+	TaintNodes() error
+
+	UntaintNodes() error
+
+	DeleteAllPods() error
+
+	CleanUp() error
 }
 
 // Scenario represents a scaling simulation scenario. Each scenario is invocable by an HTTP endpoint and hence extends http.Handler

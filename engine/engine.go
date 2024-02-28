@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/elankath/scaler-simulator/scenarios/p"
 	"log/slog"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/elankath/scaler-simulator/scenarios/p"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -76,6 +77,7 @@ func (e *engine) addRoutes() {
 
 	scenarioA := a.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioA.Name(), scenarioA)
+	e.mux.Handle("POST /scenarios/"+scenarioA.Name()+"/cleanup", scenarioA)
 
 	scenarioC := c.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioC.Name(), scenarioC)

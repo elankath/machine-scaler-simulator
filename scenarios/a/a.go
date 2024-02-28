@@ -2,12 +2,14 @@ package a
 
 import (
 	"fmt"
-	"github.com/elankath/scaler-simulator/scaleutil"
-	"github.com/elankath/scaler-simulator/virtualcluster"
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
+
+	"github.com/elankath/scaler-simulator/scaleutil"
+	"github.com/elankath/scaler-simulator/virtualcluster"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/simutil"
@@ -28,8 +30,24 @@ func New(engine scalesim.Engine) scalesim.Scenario {
 }
 
 func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.Contains(r.URL.Path, "cleanup") {
+		err := s.engine.ShootAccess(shootName).CleanUp()
+		if err != nil {
+			webutil.InternalError(w, err)
+		} else {
+			webutil.Log(w, "Cleanup of shoot successful: "+s.Name()+"...")
+		}
+		return
+	}
+
 	webutil.Log(w, "Commencing scenario: "+s.Name()+"...")
-	//webutil.Log(w, "Tainting existing nodes in shoot: "+shootName+"...")
+
+	webutil.Log(w, "Tainting existing nodes in shoot: "+shootName+"...")
+	err := s.engine.ShootAccess(shootName).TaintNodes()
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
 
 	webutil.Log(w, "Creating pods in shoot: "+shootName+"...")
 	podCount := webutil.GetIntQueryParam(r, "replicas", 4)
@@ -37,7 +55,7 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	workingDir, _ := os.Getwd()
 	absolutePath := workingDir + "/" + podSpecPath
 	webutil.Log(w, fmt.Sprintf("Applying %d replicas of pod spec: %s...", podCount, podSpecPath))
-	err := s.engine.ShootAccess(shootName).CreatePods(absolutePath, podCount)
+	err = s.engine.ShootAccess(shootName).CreatePods(absolutePath, podCount)
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
@@ -72,16 +90,14 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	unscheduledPods, err := s.engine.ShootAccess(shootName).GetUnscheduledPods()
 	if err != nil {
-		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
-		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+		simutil.LogError(w, s.Name(), err)
 		return
 	}
 
 	if len(unscheduledPods) != 0 {
 		err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), virtualcluster.BinPackingSchedulerName, unscheduledPods...)
 		if err != nil {
-			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
-			slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+			simutil.LogError(w, s.Name(), err)
 			return
 		}
 	}
@@ -90,8 +106,7 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	webutil.Logf(w, "Waiting till there are no unschedulable pods in virtual cluster or timeout of %.2f secs", timeoutSecs.Seconds())
 	err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs, scaleStartTime)
 	if err != nil { // TODO: too much repetition move this to scenarios as utility function
-		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
-		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+		simutil.LogError(w, s.Name(), err)
 		return
 	}
 	nodePodAssignments, err := simutil.GetNodePodAssignments(r.Context(), s.engine.VirtualClusterAccess())
@@ -102,22 +117,19 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	recommendation, err := simutil.GetScalerRecommendation(r.Context(), s.engine.VirtualClusterAccess(), nodePodAssignments)
 	if err != nil {
-		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
-		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+		simutil.LogError(w, s.Name(), err)
 		return
 	}
 
 	err = simutil.PrintScheduledPodEvents(r.Context(), s.engine.VirtualClusterAccess(), scaleStartTime, w)
 	if err != nil {
-		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
-		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+		simutil.LogError(w, s.Name(), err)
 		return
 	}
 
 	err = scaleutil.ParseRecommendationsAndScaleUp(s.engine.ShootAccess(shootName), recommendation, w)
 	if err != nil {
-		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
-		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+		simutil.LogError(w, s.Name(), err)
 		return
 	}
 

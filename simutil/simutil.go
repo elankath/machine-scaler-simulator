@@ -4,11 +4,12 @@ import (
 	"cmp"
 	"context"
 	"fmt"
-	"github.com/elankath/scaler-simulator/webutil"
 	"log/slog"
 	"net/http"
 	"slices"
 	"time"
+
+	"github.com/elankath/scaler-simulator/webutil"
 
 	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"golang.org/x/exp/maps"
@@ -311,4 +312,9 @@ func GetScalerRecommendation(ctx context.Context, a scalesim.VirtualClusterAcces
 	}
 
 	return recommendation, nil
+}
+
+func LogError(w http.ResponseWriter, scenarioName string, err error) {
+	webutil.Log(w, "Execution of scenario: "+scenarioName+" completed with error: "+err.Error())
+	slog.Error("Execution of scenario: "+scenarioName+" ran into error", "error", err)
 }
