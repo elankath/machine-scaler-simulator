@@ -3,12 +3,14 @@ package simutil
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
 	"time"
 
+	"github.com/elankath/scaler-simulator/virtualcluster"
 	"github.com/elankath/scaler-simulator/webutil"
 
 	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -119,6 +121,9 @@ func GetNodePodAssignments(ctx context.Context, a scalesim.VirtualClusterAccess)
 	nodes, err := a.ListNodes(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if len(nodes) == 0 {
+		return nil, errors.New("no scale up done")
 	}
 	assignMap := make(map[string]scalesim.NodePodAssignment)
 	for _, n := range nodes {
@@ -317,4 +322,35 @@ func GetScalerRecommendation(ctx context.Context, a scalesim.VirtualClusterAcces
 func LogError(w http.ResponseWriter, scenarioName string, err error) {
 	webutil.Log(w, "Execution of scenario: "+scenarioName+" completed with error: "+err.Error())
 	slog.Error("Execution of scenario: "+scenarioName+" ran into error", "error", err)
+}
+
+func ApplyDsPodsToNodes(ctx context.Context, v scalesim.VirtualClusterAccess, dsPods []corev1.Pod) error {
+	allNodes, err := v.ListNodes(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, node := range allNodes {
+		if node.Annotations["app.kubernetes.io/existing-node"] != "" {
+			continue
+		}
+		var deployablePods []corev1.Pod
+		for _, pod := range dsPods {
+			p := *pod.DeepCopy()
+			if p.GenerateName != "" {
+				p.Name = ""
+			}
+			p.Spec.NodeName = node.Name
+			p.Spec.PriorityClassName = ""
+			p.Spec.Priority = nil
+			deployablePods = append(deployablePods, p)
+		}
+		slog.Info("Creating DS pods for node", "node", node.Name, "numPods", len(deployablePods))
+		err = v.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, deployablePods...)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log/slog"
 	"os"
 	"os/exec"
 	"syscall"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -40,14 +42,30 @@ var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implement
 
 func (a *access) CreatePods(ctx context.Context, schedulerName string, pods ...corev1.Pod) error {
 	for _, pod := range pods {
+		var podObjMeta metav1.ObjectMeta
+		if pod.GenerateName != "" {
+			podObjMeta = metav1.ObjectMeta{
+				GenerateName:    pod.GenerateName,
+				Namespace:       pod.Namespace,
+				OwnerReferences: pod.OwnerReferences,
+				Labels:          pod.Labels,
+				Annotations:     pod.Annotations,
+			}
+		} else {
+			podObjMeta = metav1.ObjectMeta{
+				Name:            pod.Name,
+				Namespace:       pod.Namespace,
+				OwnerReferences: pod.OwnerReferences,
+				Labels:          pod.Labels,
+				Annotations:     pod.Annotations,
+			}
+		}
 		dupPod := corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      pod.Name,
-				Namespace: pod.Namespace,
-			},
-			Spec: pod.Spec,
+			ObjectMeta: podObjMeta,
+			Spec:       pod.Spec,
 		}
 		dupPod.Spec.SchedulerName = schedulerName
+		dupPod.Spec.TerminationGracePeriodSeconds = ptr.To(int64(0))
 		err := a.client.Create(ctx, &dupPod)
 		if err != nil {
 			slog.Error("Error creating the pod.", "error", err)
@@ -162,7 +180,7 @@ func (a *access) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 func (a *access) ListPods(ctx context.Context) ([]corev1.Pod, error) {
 	podList := corev1.PodList{}
 	if err := a.client.List(ctx, &podList); err != nil {
-		slog.Error("cannot list nodes", "error", err)
+		slog.Error("cannot list pods", "error", err)
 		return nil, err
 	}
 	return podList.Items, nil
@@ -177,7 +195,7 @@ func (a *access) GetPod(ctx context.Context, fullName types.NamespacedName) (*co
 func (a *access) ListEvents(ctx context.Context) ([]corev1.Event, error) {
 	eventList := corev1.EventList{}
 	if err := a.client.List(ctx, &eventList); err != nil {
-		slog.Error("error listing nodes", "error", err)
+		slog.Error("error list events", "error", err)
 		return nil, err
 	}
 	return eventList.Items, nil
@@ -186,7 +204,7 @@ func (a *access) ListEvents(ctx context.Context) ([]corev1.Event, error) {
 func (a *access) RemoveTaintFromVirtualNodes(ctx context.Context) error {
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList); err != nil {
-		slog.Error("error listing nodes", "error", err)
+		slog.Error("error list nodes", "error", err)
 		return err
 	}
 
@@ -280,6 +298,57 @@ func (a *access) ClearPods(ctx context.Context) error {
 			return fmt.Errorf("cannot delete pod %q: %w", p.Name, err)
 		}
 	}
+	return nil
+}
+
+func (a *access) TrimCluster(ctx context.Context) error {
+	nonEmptyNodes := make(map[string]struct{})
+
+	podList, err := a.ListPods(ctx)
+	if err != nil {
+		return err
+	}
+
+outer:
+	for _, pod := range podList {
+		for _, ownRef := range pod.OwnerReferences {
+			if ownRef.Kind == "DaemonSet" {
+				continue outer
+			}
+		}
+		if pod.Spec.NodeName != "" {
+			nonEmptyNodes[pod.Spec.NodeName] = struct{}{}
+		}
+	}
+
+	nodes, err := a.ListNodes(ctx)
+	if err != nil {
+		return err
+	}
+
+	for _, n := range nodes {
+		_, ok := nonEmptyNodes[n.Name]
+		if ok {
+			continue
+		}
+		slog.Info("deleting node from cluster", "nodeName", n.Name)
+		err = a.client.Delete(ctx, &n)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, pod := range podList {
+		_, ok := nonEmptyNodes[pod.Spec.NodeName]
+		if !ok {
+			slog.Info("deleting pod from cluster", "podName", pod.Name, "nodeName", pod.Spec.NodeName)
+			err = a.client.Delete(ctx, &pod)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 

@@ -64,7 +64,11 @@ type VirtualClusterAccess interface {
 	ListEvents(cts context.Context) ([]corev1.Event, error)
 	ListNodes(ctx context.Context) ([]corev1.Node, error)
 
+	// ListPods lists all pods from all namespaces
 	ListPods(ctx context.Context) ([]corev1.Pod, error)
+
+	// TrimCluster deletes unused nodes and daemonset pods on these nodes
+	TrimCluster(ctx context.Context) error
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster
@@ -80,6 +84,8 @@ type ShootAccess interface {
 
 	// GetUnscheduledPods returns slice of unscheduled pods of the shoot cluster
 	GetUnscheduledPods() ([]corev1.Pod, error)
+
+	GetDSPods() ([]corev1.Pod, error)
 
 	// GetMachineDeployments returns slice of machine deployments of the shoot cluster
 	GetMachineDeployments() ([]*machinev1alpha1.MachineDeployment, error)

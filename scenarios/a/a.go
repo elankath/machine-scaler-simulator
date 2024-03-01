@@ -88,6 +88,17 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	webutil.Log(w, fmt.Sprintf("Created %d total virtual nodes", numCreatedNodes))
 
+	dsPods, err := s.engine.ShootAccess(shootName).GetDSPods()
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+	err = simutil.ApplyDsPodsToNodes(r.Context(), s.engine.VirtualClusterAccess(), dsPods)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+
 	unscheduledPods, err := s.engine.ShootAccess(shootName).GetUnscheduledPods()
 	if err != nil {
 		simutil.LogError(w, s.Name(), err)
@@ -109,6 +120,14 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		simutil.LogError(w, s.Name(), err)
 		return
 	}
+
+	webutil.Log(w, "Trimming virtual cluster...")
+	err = s.engine.VirtualClusterAccess().TrimCluster(r.Context())
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+
 	nodePodAssignments, err := simutil.GetNodePodAssignments(r.Context(), s.engine.VirtualClusterAccess())
 	if err != nil {
 		webutil.InternalError(w, err)

@@ -8,6 +8,7 @@ import (
 	"os/exec"
 
 	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
+	"golang.org/x/exp/maps"
 
 	gardencore "github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	corev1 "k8s.io/api/core/v1"
@@ -24,7 +25,7 @@ type shootAccess struct {
 	getNodesCmd      *exec.Cmd
 	getMCDCmd        *exec.Cmd
 	getPodsCmd       *exec.Cmd
-	applyPodsCmd     *exec.Cmd
+	getAllPodsCmd    *exec.Cmd
 	taintNodesCmd    *exec.Cmd
 	untaintNodesCmd  *exec.Cmd
 	deleteAllPodsCmd *exec.Cmd
@@ -69,6 +70,11 @@ func InitShootAccess(landscapeName, projectName, shootName string) scalesim.Shoo
 	getPodsCmd := exec.Command("bash", "-l", "-c", shellCmd)
 	getPodsCmd.Env = cmdEnv
 
+	shellCmd = fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s  >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl get pod -A -oyaml",
+		landscapeName, projectName, shootName)
+	getAllPodsCmd := exec.Command("bash", "-l", "-c", shellCmd)
+	getAllPodsCmd.Env = cmdEnv
+
 	shellCmd = fmt.Sprintf("gardenctl target --garden %s --project %s --shoot %s  >&2 &&  eval $(gardenctl kubectl-env bash) && kubectl taint nodes --all scaleSim:NoSchedule",
 		landscapeName, projectName, shootName)
 	taintNodesCmd := exec.Command("bash", "-l", "-c", shellCmd)
@@ -92,6 +98,7 @@ func InitShootAccess(landscapeName, projectName, shootName string) scalesim.Shoo
 		getNodesCmd:      getNodesCmd,
 		getMCDCmd:        getMCDCmd,
 		getPodsCmd:       getPodsCmd,
+		getAllPodsCmd:    getAllPodsCmd,
 		taintNodesCmd:    taintNodesCmd,
 		untaintNodesCmd:  untaintNodesCmd,
 		deleteAllPodsCmd: deleteAllPodsCmd,
@@ -115,6 +122,11 @@ func (s *shootAccess) clearCommands() {
 	reset(s.getNodesCmd)
 	reset(s.getShootCmd)
 	reset(s.getMCDCmd)
+	reset(s.getPodsCmd)
+	reset(s.getAllPodsCmd)
+	reset(s.taintNodesCmd)
+	reset(s.untaintNodesCmd)
+	reset(s.deleteAllPodsCmd)
 }
 
 func reset(c *exec.Cmd) {
@@ -177,6 +189,19 @@ func (s *shootAccess) getPods() ([]*corev1.Pod, error) {
 		var exitErr *exec.ExitError
 		errors.As(err, &exitErr)
 		slog.Error("cannot get shoot pods in the default namespace", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
+		return nil, err
+	}
+	return serutil.DecodeList[*corev1.Pod](cmdOutput)
+}
+
+func (s *shootAccess) getAllPods() ([]*corev1.Pod, error) {
+	s.clearCommands()
+	slog.Info("shootAccess.getAllPods().", "command", s.getAllPodsCmd.String())
+	cmdOutput, err := s.getAllPodsCmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		errors.As(err, &exitErr)
+		slog.Error("cannot get all shoot pods", "error", err, "stdout", string(cmdOutput), "stderr", string(exitErr.Stderr))
 		return nil, err
 	}
 	return serutil.DecodeList[*corev1.Pod](cmdOutput)
@@ -262,4 +287,25 @@ func (s *shootAccess) CleanUp() error {
 	}
 
 	return s.UntaintNodes()
+}
+
+func (s *shootAccess) GetDSPods() ([]corev1.Pod, error) {
+	podsMap := make(map[string]corev1.Pod)
+
+	allPods, err := s.getAllPods()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, pod := range allPods {
+		for _, ownerRef := range pod.ObjectMeta.OwnerReferences {
+			if ownerRef.Kind == "DaemonSet" {
+				if pod.GenerateName != "" {
+					podsMap[pod.GenerateName] = *pod
+				}
+			}
+		}
+	}
+
+	return maps.Values(podsMap), nil
 }
