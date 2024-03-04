@@ -74,37 +74,79 @@ graph LR
        simulation--LauchNodesIfPodUnschedulable-->apiserver
        simulation--QueryAssignedNode-->apiserver
        scheduler--AssignPodToNode-->apiserver
-       simulation--ReportAdvice-->advice
+       simulation--ScalingRecommendation-->advice
     end
     advice[(ScalingRecommendation)]
 ```
 
-### Simulation Scenarios
+### Demo Simulation Scenarios (4th March)
 
-#### Scenario: Simple Scale-from-zero
+Other simulations are Work In Progress at the moment.
 
-We have two worker groups with min=1, max=1 with machine types: `m5.large`, `m5.2xlarge` respectively.
+#### Scenario with daemon set pods and virtual nodes with reserved space
+
+Simple Worker Pool with `m5.large` (vCPU:2,8GB).
 
 ```mermaid
 graph TB
- subgraph WP-B
-  SpecB["machineType: m5.2xlarge\nmin:0,max:1"]
- end
- subgraph WP-A
-  SpecA["machineType: m5.large\nmin:1,max:1"]
+ subgraph WorkerPool-P1
+  SpecB["machineType: m5.large\n(vCPU:2, 8GB)\nmin:1,max:5"]
  end
  ```
-##### Step-A
-   1. We will assign a single pod with large request so that it can only fit into `WP_B`
-   1. The simulation must recommend scale up of `WP_B` group from zero and say pod is assigned to this pool.
 
-##### Step-B
-  1. We will deploy a pod with a small request, so it can fit into either node.
-  1. The simulation must say that pod is assigned to launched node in `WP_B`
+1. We taint the existing nodes in the real shoot cluster.
+1. We create `replicas` num  of App pods in the real shoot cluster.
+1. We get the daemon set pods from the real shoot cluster.
+1. We get the unscheduled app pods from the real shoot cluster.
+1. We synchronize the virtual cluster nodes with the real shoot cluster nodes.
+1. We scale all the virtual worker pools till max
+   1. `Node.Allocatable` is now considered.
+1. We deploy the daemon set pods into the virtual cluster.
+1. We deploy the unscheduled application pods into the virtual cluster.
+1. We wait till there are no unscheduled pods or till timeout.
+1. We "Trim" the virtual cluster. (Delete empty nodes and daemon set pods on those nodes)
+1. We trim the Virtual Cluster after scheduler assigns pods.
+1. We obtain the Node<->Pod assignments
+1. We compute the scaling recommendation and print the same.
+1. We scale up the real shoot cluster and compare our scale-up recommendation against the shoot current scale-up.
 
-##### Step-C
-   1. We will deploy a pod with a request that exceeds current capacity of launched node in `WP_B`, but fits for first pool `WP_A`.
-   1. The simulation must advice that pod is assigned to node of fist group `WP_A`.
+
+#### Scenario with Declaration based Priority for Worker Pool Scale-Up
+
+This is to demonstrate preference for worker pool over others through simple order of declaration.
+
+3 Worker Pools in decreasing order of resources.
+We ask operation to configure shoot with a declaration based priority paying
+careful attention to their max bound
+
+```mermaid
+graph TB
+   subgraph WorkerPool-P3
+      SpecC["m5.large\n(vCPU:2, 8GB)\nmin:1,max:2"]
+   end
+   subgraph WorkerPool-P2
+      SpecB["m5.xlarge\n(vCPU:4, 16GB)\nmin:1,max:2"]
+   end
+   subgraph WorkerPool-P1
+      SpecA["m5.2xlarge\n(vCPU:8, 32GB)\nmin:1,max:2"]
+   end
+ ```
+
+1. We sync the virtual cluster nodes with real shoot cluster nodes. 
+1. We deploy `podA` count of Pod-A's and `podB` count of Pod-B's.
+1. We go through each worker pool by order by declaration.
+   1. We scale the worker pool till max.
+   2. We wait till for an interval to permit scheduler to assign pods to nodes.
+   3. If there are still un-schedulable Pods we continue to next worker pool, else break.
+1. We trim the Virtual Cluster after scheduler finishes.
+1. We obtain the Node<->Pod assignments
+1. We compute the scaling recommendation and print the same.
+
+This mechanism ensures that Nodes belonging to preferenced worker pool of higher priority are scaled first 
+before pools of lower priority.
+
+TODO: We can also enhance this scenario with a simulataed back-off when WPs run out of capacity.
+
 
 #### Scenario: Tainted Worker Pools. 
 
