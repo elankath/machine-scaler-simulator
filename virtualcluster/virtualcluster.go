@@ -338,6 +338,7 @@ outer:
 		}
 	}
 
+	//TODO: make this logic better. probably allow configuration.
 	for _, pod := range podList {
 		_, ok := nonEmptyNodes[pod.Spec.NodeName]
 		if !ok {

@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/elankath/scaler-simulator/scaleutil"
@@ -30,20 +29,18 @@ func New(engine scalesim.Engine) scalesim.Scenario {
 }
 
 func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if strings.Contains(r.URL.Path, "cleanup") {
-		err := s.engine.ShootAccess(shootName).CleanUp()
-		if err != nil {
-			webutil.InternalError(w, err)
-		} else {
-			webutil.Log(w, "Cleanup of shoot successful: "+s.Name()+"...")
-		}
-		return
+	webutil.Log(w, "Cleaning up real shoot for scenario: "+s.Name()+"...")
+	err := s.engine.ShootAccess(shootName).CleanUp()
+	if err != nil {
+		webutil.InternalError(w, err)
+	} else {
+		webutil.Log(w, "Cleanup of shoot successful: "+s.Name()+"...")
 	}
 
 	webutil.Log(w, "Commencing scenario: "+s.Name()+"...")
 
 	webutil.Log(w, "Tainting existing nodes in shoot: "+shootName+"...")
-	err := s.engine.ShootAccess(shootName).TaintNodes()
+	err = s.engine.ShootAccess(shootName).TaintNodes()
 	if err != nil {
 		webutil.InternalError(w, err)
 		return

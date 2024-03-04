@@ -114,6 +114,13 @@ func (s *scenarioP) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
 	}
+
+	webutil.Log(w, "Trimming virtual cluster...")
+	err = s.engine.VirtualClusterAccess().TrimCluster(r.Context())
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
 	nodePodAssignments, err := simutil.GetNodePodAssignments(r.Context(), s.engine.VirtualClusterAccess())
 	if err != nil {
 		webutil.InternalError(w, err)

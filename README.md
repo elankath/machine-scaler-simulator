@@ -1,6 +1,6 @@
 # scaler-simulator
 
-> This project is WIP - DO NOT TRY
+> This project is WIP - DO NOT TRY TILL RELEASE
  
 Scaling Simulator that determines which garden worker pool must be scaled to host unschedulable pods
 
@@ -9,6 +9,7 @@ Scaling Simulator that determines which garden worker pool must be scaled to hos
 1. Ensure you are using Go version `1.22`. Use `go version` to check your version.
 1. Run `./hack/setup.sh`
    1. This will generate a `launch.env` file in the project dir
+   2. Ex: `./hack/setup.sh -p scalesim` # setups scalesim for sap-landscape-dev (default) and scalesim cluster project
    2. Ex: `./hack/setup.sh -l staging -p scalesim` # setups scalesim for sap-landscape-staging and scalesim cluster project
 1. Take a look at generated `launch.env` and change params to your liking if you want.
 1. Source the `launch.env` file using command below (only necessary once in term session)
@@ -200,3 +201,15 @@ in case there is no assigned node.
   - in order to be computationally feasible we need the
 node priiority scores from the scheduler.
 
+
+### Prep for vedran
+
+What do demo for vedran today ?
+- daemon set + allocabtle is taken care of.
+- declaration based priority - 
+
+We will let him know that we will take up:
+a) machine cost minimization 
+b) machine resource minimization 
+c) performance load test 
+d) stretch: simple scale-down and then wind up the POC
