@@ -68,8 +68,13 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, err)
 		return
 	}
-	webutil.Log(w, fmt.Sprintf("Deployed %d Pods..wait 3s for scheduler to sync...", largeCount))
-	<-time.After(3 * time.Second)
+	timeoutSecs := 5 * time.Second
+	webutil.Logf(w, "Waiting till there are no unschedulable pods or timeout of %.2f secs", timeoutSecs.Seconds())
+	err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs, scaleStartTime)
+	if err != nil { // TODO: too much repetition move this to scenarios as utility function
+		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
+	}
 
 	podSpecPath = "scenarios/c/podSmall.yaml"
 	if err != nil {
@@ -83,7 +88,7 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	timeoutSecs := 30 * time.Second
+	timeoutSecs = 30 * time.Second
 	webutil.Logf(w, "Waiting till there are no unschedulable pods or timeout of %.2f secs", timeoutSecs.Seconds())
 	err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs, scaleStartTime)
 	if err != nil { // TODO: too much repetition move this to scenarios as utility function
@@ -91,12 +96,12 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
 	}
 
-	webutil.Log(w, "Trimming virtual cluster...")
-	err = s.engine.VirtualClusterAccess().TrimCluster(r.Context())
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
+	//webutil.Log(w, "Trimming virtual cluster...")
+	//err = s.engine.VirtualClusterAccess().TrimCluster(r.Context())
+	//if err != nil {
+	//	webutil.InternalError(w, err)
+	//	return
+	//}
 
 	nodePodAssignments, err := simutil.GetNodePodAssignments(r.Context(), s.engine.VirtualClusterAccess())
 	if err != nil {
