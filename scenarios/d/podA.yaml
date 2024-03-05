@@ -9,6 +9,7 @@ spec:
   topologySpreadConstraints:
     - maxSkew: 1
       topologyKey: "topology.kubernetes.io/zone"
+      minDomains:
       whenUnsatisfiable: DoNotSchedule
       labelSelector:
         matchLabels:

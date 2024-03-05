@@ -58,10 +58,20 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	webutil.Log(w, fmt.Sprintf("Created %d total virtual nodes", numCreatedNodes))
 
-	smallCount := webutil.GetIntQueryParam(r, "small", 12)
-	largeCount := webutil.GetIntQueryParam(r, "large", 8)
+	smallCount := webutil.GetIntQueryParam(r, "small", 10)
+	largeCount := webutil.GetIntQueryParam(r, "large", 1)
 
-	podSpecPath := "scenarios/c/podSmall.yaml"
+	podSpecPath := "scenarios/c/podLarge.yaml"
+	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, largeCount))
+	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, largeCount)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+	webutil.Log(w, fmt.Sprintf("Deployed %d Pods..wait 3s for scheduler to sync...", largeCount))
+	<-time.After(3 * time.Second)
+
+	podSpecPath = "scenarios/c/podSmall.yaml"
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
@@ -73,15 +83,6 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	podSpecPath = "scenarios/c/podLarge.yaml"
-	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, largeCount))
-	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, largeCount)
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
-	webutil.Log(w, fmt.Sprintf("Deployed %d Pods..wait for scheduler to sync...", smallCount+largeCount))
-
 	timeoutSecs := 30 * time.Second
 	webutil.Logf(w, "Waiting till there are no unschedulable pods or timeout of %.2f secs", timeoutSecs.Seconds())
 	err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs, scaleStartTime)
@@ -89,6 +90,14 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
 	}
+
+	webutil.Log(w, "Trimming virtual cluster...")
+	err = s.engine.VirtualClusterAccess().TrimCluster(r.Context())
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+
 	nodePodAssignments, err := simutil.GetNodePodAssignments(r.Context(), s.engine.VirtualClusterAccess())
 	if err != nil {
 		webutil.InternalError(w, err)
