@@ -389,7 +389,7 @@ func createKubeconfigFileForRestConfig(restConfig rest.Config) error {
 func StartScheduler(binaryAssetsDir string) (*os.Process, error) {
 	workingDir, _ := os.Getwd()
 	schedulerConfigPath := workingDir + "/virtualcluster/scheduler-config.yaml"
-	command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath, "--config", schedulerConfigPath, "--leader-elect=false", "-v=3")
+	command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath, "--config", schedulerConfigPath, "--leader-elect=false", "--v=10")
 	//command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath)
 	command.Stderr = os.Stderr
 	command.Stdout = os.Stdout

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -219,8 +220,11 @@ func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context,
 func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName string, shoot *gardencore.Shoot, w http.ResponseWriter) (int, error) {
 	webutil.Log(w, "Scaling virtual cluster worker pools till max for scenario: "+scenarioName)
 	totalNodesCreated := 0
-	for _, pool := range shoot.Spec.Provider.Workers {
+	pools := shoot.Spec.Provider.Workers
+	slices.Reverse(pools)
+	for _, pool := range pools {
 		//e.virtualAccess.ListNodes(ctx)
+		webutil.Log(w, fmt.Sprintf("Scaling pool %s till max: %d...", pool.Name, pool.Maximum))
 		numNodesCreated, err := simutil.CreateNodesTillPoolMax(ctx, e.virtualAccess, &pool)
 		if err != nil {
 			return totalNodesCreated, err

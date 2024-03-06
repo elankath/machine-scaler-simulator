@@ -4,6 +4,7 @@ clientConnection:
   kubeconfig: /tmp/scalesim-kubeconfig.yaml
 leaderElection:
   leaderElect: false
+percentageOfNodesToScore: 100
 profiles:
 - schedulerName: default-scheduler
 - schedulerName: bin-packing-scheduler
