@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/elankath/scaler-simulator/scenarios/score3"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -88,6 +89,9 @@ func (e *engine) addRoutes() {
 
 	scenarioP := p.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioP.Name(), scenarioP)
+
+	scenarioScore3 := score3.New(e)
+	e.mux.Handle("POST /scenarios/"+scenarioScore3.Name(), scenarioScore3)
 
 }
 
@@ -192,12 +196,12 @@ func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context,
 		webutil.Log(w, fmt.Sprintf("%d Unscheduled pods present. Creating a new node to schedule these pods", len(eventList)))
 
 		for _, pool := range shoot.Spec.Provider.Workers {
-			nodeCreated, err := simutil.CreateNodeInWorkerGroup(ctx, e.virtualAccess, &pool)
+			_, err := simutil.CreateNodeInWorkerGroup(ctx, e.virtualAccess, &pool)
 			if err != nil {
 				webutil.InternalError(w, err)
 				return totalNodesCreated, err
 			}
-			if !nodeCreated {
+			if err != nil {
 				err = errors.New("node could not be created - pool pool max reached")
 				slog.Error("error creating node. ", "error", err)
 				webutil.InternalError(w, err)

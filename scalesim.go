@@ -3,6 +3,7 @@ package scalesim
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -69,6 +70,10 @@ type VirtualClusterAccess interface {
 
 	// TrimCluster deletes unused nodes and daemonset pods on these nodes
 	TrimCluster(ctx context.Context) error
+
+	UpdatePods(ctx context.Context, pods ...corev1.Pod) error
+
+	DeleteNode(ctx context.Context, name string) error
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster
@@ -145,4 +150,33 @@ func (s ScalerRecommendations) String() string {
 	}
 	sb.WriteString("}")
 	return sb.String()
+}
+
+type NodeScore struct {
+	NodeName         string
+	WasteRatio       float64
+	UnscheduledRatio float64
+	CostRatio        float64
+	CumulativeScore  float64
+}
+
+func (n NodeScore) String() string {
+	return fmt.Sprintf("(Node: %s, WasteRatio: %.2f, UnscheduledRatio: %.2f, CostRatio: %.2f, CumulativeScore: %.2f)", n.NodeName, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore)
+}
+
+type AllPricing struct {
+	Results []InstancePricing `json:"results"`
+}
+
+type InstancePricing struct {
+	InstanceType string       `json:"instance_type"`
+	VCPU         float64      `json:"vcpu"`
+	Memory       float64      `json:"memory"`
+	EDPPrice     PriceDetails `json:"edp_price"`
+}
+
+type PriceDetails struct {
+	PayAsYouGo    float64 `json:"pay_as_you_go"`
+	Reserved1Year float64 `json:"ri_1_year"`
+	Reserved3Year float64 `json:"ri_3_years"`
 }

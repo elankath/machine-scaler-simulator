@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/elankath/scaler-simulator/pricing"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -210,11 +211,23 @@ func CreateNodeInWorkerGroupForZone(ctx context.Context, a scalesim.VirtualClust
 	return true, nil
 }
 
-// CreateNodeInWorkerGroup creates a sample node if the passed workerGroup objects max has not been met
-func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAccess, wg *v1beta1.Worker) (bool, error) {
+func GetNodesSet(ctx context.Context, a scalesim.VirtualClusterAccess) (map[string]*corev1.Node, error) {
+	nodesMap := make(map[string]*corev1.Node)
 	nodes, err := a.ListNodes(ctx)
 	if err != nil {
-		return false, err
+		return nil, err
+	}
+	for _, node := range nodes {
+		nodesMap[node.Name] = &node
+	}
+	return nodesMap, nil
+}
+
+// CreateNodeInWorkerGroup creates a sample node if the passed workerGroup objects max has not been met
+func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAccess, wg *v1beta1.Worker) (*corev1.Node, error) {
+	nodes, err := a.ListNodes(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	var wgNodes []corev1.Node
@@ -225,7 +238,7 @@ func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAcces
 	}
 
 	if int32(len(wgNodes)) >= wg.Maximum {
-		return false, nil
+		return nil, nil
 	}
 
 	var deployedNode *corev1.Node
@@ -236,7 +249,7 @@ func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAcces
 	}
 
 	if deployedNode == nil {
-		return false, nil
+		return nil, errors.New(fmt.Sprintf("cannot find a deployed node in the worker group for pool : %s", wg.Name))
 	}
 	node := corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -252,10 +265,27 @@ func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAcces
 		},
 	}
 	delete(node.Labels, "app.kubernetes.io/existing-node")
-	if err := a.AddNodes(ctx, &node); err != nil {
-		return false, err
+	oldNodes, err := GetNodesSet(ctx, a)
+	if err != nil {
+		return nil, err
 	}
-	return true, nil
+	if err := a.AddNodes(ctx, &node); err != nil {
+		return nil, err
+	}
+	newNodes, err := GetNodesSet(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	maps.DeleteFunc(newNodes, func(k string, _ *corev1.Node) bool {
+		_, ok := oldNodes[k]
+		return ok
+	})
+	addedNodes := maps.Values(newNodes)
+
+	if len(addedNodes) > 0 {
+		return addedNodes[0], nil
+	}
+	return nil, errors.New("no nodes added to the worker pool: " + wg.Name)
 }
 
 // CreateNodesTillPoolMax creates sample nodes in the given worker pool till the worker pool max is reached.
@@ -266,7 +296,7 @@ func CreateNodesTillPoolMax(ctx context.Context, a scalesim.VirtualClusterAccess
 		if err != nil {
 			return totalNodesCreated, err
 		}
-		if !created {
+		if created == nil {
 			break
 		}
 		totalNodesCreated++
@@ -352,5 +382,77 @@ func ApplyDsPodsToNodes(ctx context.Context, v scalesim.VirtualClusterAccess, ds
 		}
 	}
 
+	return nil
+}
+
+func GetCostRatio(scaledNode *corev1.Node, workerPools []v1beta1.Worker) float64 {
+	sumCost := float64(0)
+	poolPrice := float64(0)
+	for _, pool := range workerPools {
+		price := pricing.GetPricing(pool.Machine.Type)
+		sumCost += price
+		if pool.Name == scaledNode.Labels["worker.gardener.cloud/pool"] {
+			poolPrice = price
+		}
+	}
+	return poolPrice / sumCost
+}
+
+func CalculateNodeScore(ctx context.Context, a scalesim.VirtualClusterAccess, scaledNode *corev1.Node, workerPools []v1beta1.Worker) (scalesim.NodeScore, error) {
+	var nodeScore scalesim.NodeScore
+	nodeScore.NodeName = scaledNode.Name
+	pods, err := a.ListPods(ctx)
+	if err != nil {
+		slog.Error("Error getting the pods", "error", err)
+		return nodeScore, err
+	}
+
+	var assignedPods []corev1.Pod
+	for _, pod := range pods {
+		if pod.Spec.NodeName == scaledNode.Name {
+			assignedPods = append(assignedPods, pod)
+		}
+	}
+
+	// TODO enhance the wastescore by considering all resources
+	totalMemoryConsumed := int64(0)
+	totalAllocatableMemory := scaledNode.Status.Allocatable.Memory().MilliValue()
+	for _, pod := range assignedPods {
+		//TODO Do for all containers
+		totalMemoryConsumed += (pod.Spec.Containers[0].Resources.Requests.Memory().MilliValue())
+		slog.Info("NodPodAssignment: ", "pod", pod.Name, "node", pod.Spec.NodeName, "memory", pod.Spec.Containers[0].Resources.Requests.Memory().MilliValue())
+	}
+
+	nodeScore.WasteRatio = float64(totalAllocatableMemory-totalMemoryConsumed) / float64(totalAllocatableMemory)
+
+	nodeScore.UnscheduledRatio = float64(len(pods)-len(assignedPods)) / float64(len(pods))
+
+	nodeScore.CostRatio = GetCostRatio(scaledNode, workerPools)
+
+	nodeScore.CumulativeScore = nodeScore.WasteRatio + nodeScore.UnscheduledRatio + nodeScore.CostRatio
+
+	slog.Info("Computed node score.", "nodeScore", nodeScore)
+
+	return nodeScore, nil
+}
+
+func DeleteNodeAndClearPodAssignments(ctx context.Context, a scalesim.VirtualClusterAccess, nodeName string) error {
+	pods, err := a.ListPods(ctx)
+	if err != nil {
+		return err
+	}
+	for _, pod := range pods {
+		if pod.Spec.NodeName == nodeName {
+			pod.Spec.NodeName = ""
+		}
+	}
+	err = a.DeleteNode(ctx, nodeName)
+	if err != nil {
+		return err
+	}
+	err = a.UpdatePods(ctx, pods...)
+	if err != nil {
+		return err
+	}
 	return nil
 }
