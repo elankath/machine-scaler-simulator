@@ -40,6 +40,39 @@ type access struct {
 
 var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implements I.
 
+func (a *access) DeletePods(ctx context.Context, pods ...corev1.Pod) error {
+	for _, pod := range pods {
+		err := a.client.Delete(ctx, &pod)
+		if err != nil {
+			slog.Error("Error deleting the pod.", "error", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *access) UpdatePods(ctx context.Context, pods ...corev1.Pod) error {
+	for _, pod := range pods {
+		err := a.client.Update(ctx, &pod)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *access) DeleteNode(ctx context.Context, name string) error {
+	node := corev1.Node{}
+	err := a.client.Get(ctx, types.NamespacedName{Name: name}, &node)
+	if err != nil {
+		return err
+	}
+	err = a.client.Delete(ctx, &node)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 func (a *access) CreatePods(ctx context.Context, schedulerName string, pods ...corev1.Pod) error {
 	for _, pod := range pods {
 		var podObjMeta metav1.ObjectMeta
@@ -65,7 +98,9 @@ func (a *access) CreatePods(ctx context.Context, schedulerName string, pods ...c
 			Spec:       pod.Spec,
 		}
 		dupPod.Spec.SchedulerName = schedulerName
+		dupPod.Spec.NodeName = ""
 		dupPod.Spec.TerminationGracePeriodSeconds = ptr.To(int64(0))
+		dupPod.Status = corev1.PodStatus{}
 		err := a.client.Create(ctx, &dupPod)
 		if err != nil {
 			slog.Error("Error creating the pod.", "error", err)
@@ -389,7 +424,7 @@ func createKubeconfigFileForRestConfig(restConfig rest.Config) error {
 func StartScheduler(binaryAssetsDir string) (*os.Process, error) {
 	workingDir, _ := os.Getwd()
 	schedulerConfigPath := workingDir + "/virtualcluster/scheduler-config.yaml"
-	command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath, "--config", schedulerConfigPath, "--leader-elect=false", "--v=10")
+	command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath, "--config", schedulerConfigPath, "--leader-elect=false", "--v=3")
 	//command := exec.Command(binaryAssetsDir+"/kube-scheduler", "--kubeconfig", kubeConfigPath)
 	command.Stderr = os.Stderr
 	command.Stdout = os.Stdout
