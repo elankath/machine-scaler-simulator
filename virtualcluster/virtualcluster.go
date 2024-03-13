@@ -40,6 +40,17 @@ type access struct {
 
 var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implements I.
 
+func (a *access) DeletePods(ctx context.Context, pods ...corev1.Pod) error {
+	for _, pod := range pods {
+		err := a.client.Delete(ctx, &pod)
+		if err != nil {
+			slog.Error("Error deleting the pod.", "error", err)
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *access) UpdatePods(ctx context.Context, pods ...corev1.Pod) error {
 	for _, pod := range pods {
 		err := a.client.Update(ctx, &pod)
@@ -87,7 +98,9 @@ func (a *access) CreatePods(ctx context.Context, schedulerName string, pods ...c
 			Spec:       pod.Spec,
 		}
 		dupPod.Spec.SchedulerName = schedulerName
+		dupPod.Spec.NodeName = ""
 		dupPod.Spec.TerminationGracePeriodSeconds = ptr.To(int64(0))
+		dupPod.Status = corev1.PodStatus{}
 		err := a.client.Create(ctx, &dupPod)
 		if err != nil {
 			slog.Error("Error creating the pod.", "error", err)

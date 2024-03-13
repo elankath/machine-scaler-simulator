@@ -105,6 +105,10 @@ func WaitTillNoUnscheduledPodsOrTimeout(ctx context.Context, access scalesim.Vir
 
 func WaitAndGetUnscheduledPodCount(ctx context.Context, access scalesim.VirtualClusterAccess, waitSec int) (int, error) {
 	<-time.After(time.Duration(waitSec) * time.Second)
+	return GetUnscheduledPodCount(ctx, access)
+}
+
+func GetUnscheduledPodCount(ctx context.Context, access scalesim.VirtualClusterAccess) (int, error) {
 	unscheduledPodCount := 0
 	pods, err := access.ListPods(ctx)
 	if err != nil {
@@ -398,22 +402,32 @@ func GetCostRatio(scaledNode *corev1.Node, workerPools []v1beta1.Worker) float64
 	return poolPrice / sumCost
 }
 
-func CalculateNodeScore(ctx context.Context, a scalesim.VirtualClusterAccess, scaledNode *corev1.Node, workerPools []v1beta1.Worker) (scalesim.NodeScore, error) {
-	var nodeScore scalesim.NodeScore
-	nodeScore.NodeName = scaledNode.Name
-	pods, err := a.ListPods(ctx)
-	if err != nil {
-		slog.Error("Error getting the pods", "error", err)
-		return nodeScore, err
+func GetMatchingPods(allPods []corev1.Pod, filterPods []corev1.Pod) []corev1.Pod {
+	var matchingPods []corev1.Pod
+	filterPodsByName := make(map[string]corev1.Pod)
+	for _, pod := range filterPods {
+		filterPodsByName[pod.Name] = pod
 	}
+	for _, pods := range allPods {
+		if _, ok := filterPodsByName[pods.Name]; ok {
+			matchingPods = append(matchingPods, pods)
+		}
+	}
+	return matchingPods
+}
+
+func ComputeNodeRunResult(ctx context.Context, a scalesim.VirtualClusterAccess, scaledNode *corev1.Node, podListForRun []corev1.Pod, workerPools []v1beta1.Worker) (scalesim.NodeRunResult, error) {
+	var nodeScore scalesim.NodeRunResult
+	nodeScore.NodeName = scaledNode.Name
 
 	var assignedPods []corev1.Pod
-	for _, pod := range pods {
+	for _, pod := range podListForRun {
 		if pod.Spec.NodeName == scaledNode.Name {
 			assignedPods = append(assignedPods, pod)
 		}
 	}
 
+	nodeScore.NumAssignedPods = len(assignedPods)
 	// TODO enhance the wastescore by considering all resources
 	totalMemoryConsumed := int64(0)
 	totalAllocatableMemory := scaledNode.Status.Allocatable.Memory().MilliValue()
@@ -425,34 +439,75 @@ func CalculateNodeScore(ctx context.Context, a scalesim.VirtualClusterAccess, sc
 
 	nodeScore.WasteRatio = float64(totalAllocatableMemory-totalMemoryConsumed) / float64(totalAllocatableMemory)
 
-	nodeScore.UnscheduledRatio = float64(len(pods)-len(assignedPods)) / float64(len(pods))
+	nodeScore.UnscheduledRatio = float64(len(podListForRun)-len(assignedPods)) / float64(len(podListForRun))
 
 	nodeScore.CostRatio = GetCostRatio(scaledNode, workerPools)
 
 	nodeScore.CumulativeScore = nodeScore.WasteRatio + nodeScore.UnscheduledRatio + nodeScore.CostRatio
 
+	for _, pool := range workerPools {
+		if scaledNode.Labels["worker.gardener.cloud/pool"] == pool.Name {
+			nodeScore.Pool = &pool
+			break
+		}
+	}
+
+	if nodeScore.Pool == nil {
+		return nodeScore, errors.New("cannot find pool for node: " + scaledNode.Name)
+	}
 	slog.Info("Computed node score.", "nodeScore", nodeScore)
 
 	return nodeScore, nil
 }
 
-func DeleteNodeAndClearPodAssignments(ctx context.Context, a scalesim.VirtualClusterAccess, nodeName string) error {
-	pods, err := a.ListPods(ctx)
+func DeleteNodeAndResetPods(ctx context.Context, a scalesim.VirtualClusterAccess, nodeName string, podListForRun []corev1.Pod) ([]corev1.Pod, error) {
+	err := a.DeleteNode(ctx, nodeName)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, pod := range pods {
-		if pod.Spec.NodeName == nodeName {
-			pod.Spec.NodeName = ""
+	err = a.DeletePods(ctx, podListForRun...)
+	if err != nil {
+		return nil, err
+	}
+	createdTime := time.Now()
+	err = a.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, podListForRun...)
+	if err != nil {
+		return nil, err
+	}
+	allPods, err := a.ListPods(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var newPods []corev1.Pod
+	for _, pod := range allPods {
+		if pod.CreationTimestamp.After(createdTime) {
+			newPods = append(newPods, pod)
 		}
 	}
-	err = a.DeleteNode(ctx, nodeName)
+	return newPods, nil
+}
+
+func GetPodsAssignedToNode(ctx context.Context, a scalesim.VirtualClusterAccess, nodeName string) ([]corev1.Pod, error) {
+	pods, err := a.ListPods(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	err = a.UpdatePods(ctx, pods...)
-	if err != nil {
-		return err
+	var assignedPods []corev1.Pod
+	for _, pod := range pods {
+		if pod.Spec.NodeName == nodeName {
+			assignedPods = append(assignedPods, pod)
+		}
 	}
-	return nil
+	return assignedPods, nil
+}
+
+func DeleteAssignedPods(podListForRun []corev1.Pod, assignedPods []corev1.Pod) []corev1.Pod {
+	assignedPodsByName := make(map[string]corev1.Pod)
+	for _, pod := range assignedPods {
+		assignedPodsByName[pod.Name] = pod
+	}
+	return slices.DeleteFunc(podListForRun, func(p corev1.Pod) bool {
+		_, ok := assignedPodsByName[p.Name]
+		return ok
+	})
 }

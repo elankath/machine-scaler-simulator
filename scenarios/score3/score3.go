@@ -70,11 +70,69 @@ func (s *scenarioScore3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	//scaleStartTime := time.Now()
-	webutil.Log(w, "Scenario-Start: Scaling workerpool by one, one by one...")
-	nodeScores := make(map[string]scalesim.NodeScore)
-	for _, pool := range shoot.Spec.Provider.Workers {
-		webutil.Logf(w, "Scaling workerpool %s...", pool.Name)
-		scaledNode, err := simutil.CreateNodeInWorkerGroup(r.Context(), s.engine.VirtualClusterAccess(), &pool)
+	podListForRun, err := s.engine.VirtualClusterAccess().ListPods(r.Context())
+	if err != nil {
+		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+		return
+	}
+
+	runCounter := 0
+	for {
+		runCounter++
+		unscheduledPodCount, err := simutil.GetUnscheduledPodCount(r.Context(), s.engine.VirtualClusterAccess())
+		if err != nil {
+			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+			return
+		}
+		if unscheduledPodCount == 0 {
+			webutil.Log(w, "All pods are scheduled. Exiting the loop...")
+			break
+		}
+		webutil.Log(w, fmt.Sprintf("Scenario-Run#%d: Scaling workerpool by one, one by one...", runCounter))
+		nodeScores := scalesim.NodeRunResults(make(map[string]scalesim.NodeRunResult))
+		for _, pool := range shoot.Spec.Provider.Workers {
+			webutil.Logf(w, "Scaling workerpool %s...", pool.Name)
+			scaledNode, err := simutil.CreateNodeInWorkerGroup(r.Context(), s.engine.VirtualClusterAccess(), &pool)
+			if err != nil {
+				webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+				return
+			}
+			err = s.engine.VirtualClusterAccess().RemoveTaintFromVirtualNodes(r.Context())
+			if err != nil {
+				webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+				return
+			}
+			webutil.Log(w, "Waiting for 5 seconds before calculating node score...")
+			time.Sleep(5 * time.Second)
+			allPods, err := s.engine.VirtualClusterAccess().ListPods(r.Context())
+			if err != nil {
+				webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+				return
+			}
+
+			podListForRun = simutil.GetMatchingPods(allPods, podListForRun)
+			nodeScores[scaledNode.Name], err = simutil.ComputeNodeRunResult(r.Context(), s.engine.VirtualClusterAccess(), scaledNode, podListForRun, shoot.Spec.Provider.Workers)
+			if err != nil {
+				webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+				return
+			}
+			webutil.Log(w, fmt.Sprintf("Node score for %s: %v", scaledNode.Name, nodeScores[scaledNode.Name]))
+			webutil.Log(w, "Deleting scaled node and clearing pod assignments...")
+			podListForRun, err = simutil.DeleteNodeAndResetPods(r.Context(), s.engine.VirtualClusterAccess(), scaledNode.Name, podListForRun)
+			if err != nil {
+				webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+				return
+			}
+		}
+		if nodeScores.GetTotalAssignedPods() == 0 {
+			webutil.Log(w, fmt.Sprintf("No pods are scheduled on the scaled nodes on Run#%d. Exiting the loop...", runCounter))
+			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error")
+			break
+		}
+		webutil.Log(w, fmt.Sprintf("%+v", nodeScores))
+		winnerNodeScore := nodeScores.GetWinner()
+		webutil.Log(w, "Winning Score: "+winnerNodeScore.String())
+		scaledNode, err := simutil.CreateNodeInWorkerGroup(r.Context(), s.engine.VirtualClusterAccess(), winnerNodeScore.Pool)
 		if err != nil {
 			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 			return
@@ -84,23 +142,21 @@ func (s *scenarioScore3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 			return
 		}
-		webutil.Log(w, "Waiting for 5 seconds before calculating node score...")
-		time.Sleep(5 * time.Second)
-		nodeScores[scaledNode.Name], err = simutil.CalculateNodeScore(r.Context(), s.engine.VirtualClusterAccess(), scaledNode, shoot.Spec.Provider.Workers)
+		webutil.Log(w, "Waiting for 3 seconds for pod assignments to winning scalednode: "+scaledNode.Name)
+		time.Sleep(3 * time.Second)
+		assignedPods, err := simutil.GetPodsAssignedToNode(r.Context(), s.engine.VirtualClusterAccess(), scaledNode.Name)
 		if err != nil {
-			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error")
 			return
 		}
-		webutil.Log(w, fmt.Sprintf("Node score for %s: %v", scaledNode.Name, nodeScores[scaledNode.Name]))
-		webutil.Log(w, "Deleting scaled node and clearing pod assignments...")
-		err = simutil.DeleteNodeAndClearPodAssignments(r.Context(), s.engine.VirtualClusterAccess(), scaledNode.Name)
-		if err != nil {
-			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
+		if len(assignedPods) == 0 {
+			webutil.Log(w, "No pods are assigned to the winning scaled node "+scaledNode.Name)
+			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error")
 			return
 		}
+		podListForRun = simutil.DeleteAssignedPods(podListForRun, assignedPods)
 	}
 
-	webutil.Log(w, fmt.Sprintf("%+v", nodeScores))
 	//numCreatedNodes, err := s.engine.ScaleAllWorkerPoolsTillMax(r.Context(), s.Name(), shoot, w)
 	//if err != nil {
 	//	webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())

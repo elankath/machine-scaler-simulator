@@ -4,6 +4,7 @@ package scalesim
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -74,6 +75,8 @@ type VirtualClusterAccess interface {
 	UpdatePods(ctx context.Context, pods ...corev1.Pod) error
 
 	DeleteNode(ctx context.Context, name string) error
+
+	DeletePods(ctx context.Context, pods ...corev1.Pod) error
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster
@@ -152,16 +155,18 @@ func (s ScalerRecommendations) String() string {
 	return sb.String()
 }
 
-type NodeScore struct {
+type NodeRunResult struct {
 	NodeName         string
+	Pool             *gardencore.Worker
 	WasteRatio       float64
 	UnscheduledRatio float64
 	CostRatio        float64
 	CumulativeScore  float64
+	NumAssignedPods  int
 }
 
-func (n NodeScore) String() string {
-	return fmt.Sprintf("(Node: %s, WasteRatio: %.2f, UnscheduledRatio: %.2f, CostRatio: %.2f, CumulativeScore: %.2f)", n.NodeName, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore)
+func (n NodeRunResult) String() string {
+	return fmt.Sprintf("(Node: %s, WasteRatio: %.2f, UnscheduledRatio: %.2f, CostRatio: %.2f, CumulativeScore: %.2f, NumAssignedPods: %d)", n.NodeName, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore, n.NumAssignedPods)
 }
 
 type AllPricing struct {
@@ -179,4 +184,26 @@ type PriceDetails struct {
 	PayAsYouGo    float64 `json:"pay_as_you_go"`
 	Reserved1Year float64 `json:"ri_1_year"`
 	Reserved3Year float64 `json:"ri_3_years"`
+}
+
+type NodeRunResults map[string]NodeRunResult
+
+func (ns NodeRunResults) GetWinner() NodeRunResult {
+	var winner NodeRunResult
+	minScore := math.MaxFloat64
+	for _, v := range ns {
+		if v.CumulativeScore < minScore {
+			winner = v
+			minScore = v.CumulativeScore
+		}
+	}
+	return winner
+}
+
+func (ns NodeRunResults) GetTotalAssignedPods() int {
+	var total int
+	for _, v := range ns {
+		total += v.NumAssignedPods
+	}
+	return total
 }
