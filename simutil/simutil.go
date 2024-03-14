@@ -470,6 +470,7 @@ func DeleteNodeAndResetPods(ctx context.Context, a scalesim.VirtualClusterAccess
 		return nil, err
 	}
 	createdTime := time.Now()
+	time.Sleep(2 * time.Second)
 	err = a.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, podListForRun...)
 	if err != nil {
 		return nil, err

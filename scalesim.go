@@ -166,7 +166,7 @@ type NodeRunResult struct {
 }
 
 func (n NodeRunResult) String() string {
-	return fmt.Sprintf("(Node: %s, WasteRatio: %.2f, UnscheduledRatio: %.2f, CostRatio: %.2f, CumulativeScore: %.2f, NumAssignedPods: %d)", n.NodeName, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore, n.NumAssignedPods)
+	return fmt.Sprintf("(Node: %s, WasteRatio: %.4f, UnscheduledRatio: %.4f, CostRatio: %.4f, CumulativeScore: %.4f, NumAssignedPods: %d)", n.NodeName, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore, n.NumAssignedPods)
 }
 
 type AllPricing struct {
