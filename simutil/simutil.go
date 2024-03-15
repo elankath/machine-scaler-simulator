@@ -5,11 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/elankath/scaler-simulator/pricing"
 	"log/slog"
 	"net/http"
 	"slices"
 	"time"
+
+	"github.com/elankath/scaler-simulator/pricing"
 
 	"github.com/elankath/scaler-simulator/virtualcluster"
 	"github.com/elankath/scaler-simulator/webutil"
@@ -416,33 +417,36 @@ func GetMatchingPods(allPods []corev1.Pod, filterPods []corev1.Pod) []corev1.Pod
 	return matchingPods
 }
 
-func ComputeNodeRunResult(ctx context.Context, a scalesim.VirtualClusterAccess, scaledNode *corev1.Node, podListForRun []corev1.Pod, workerPools []v1beta1.Worker) (scalesim.NodeRunResult, error) {
+func ComputeNodeRunResult(scaledNode *corev1.Node, podListForRun []corev1.Pod, workerPools []v1beta1.Worker) (scalesim.NodeRunResult, error) {
 	var nodeScore scalesim.NodeRunResult
 	nodeScore.NodeName = scaledNode.Name
 
-	var assignedPods []corev1.Pod
+	var totalAssignedPods int
+	var targetNodeAssignedPods []corev1.Pod
 	for _, pod := range podListForRun {
+		if pod.Spec.NodeName != "" {
+			totalAssignedPods++
+		}
 		if pod.Spec.NodeName == scaledNode.Name {
-			assignedPods = append(assignedPods, pod)
+			targetNodeAssignedPods = append(targetNodeAssignedPods, pod)
 		}
 	}
 
-	nodeScore.NumAssignedPods = len(assignedPods)
+	nodeScore.NumAssignedPodsTotal = totalAssignedPods
+	nodeScore.NumAssignedPodsToNode = len(targetNodeAssignedPods)
 	// TODO enhance the wastescore by considering all resources
 	totalMemoryConsumed := int64(0)
 	totalAllocatableMemory := scaledNode.Status.Allocatable.Memory().MilliValue()
-	for _, pod := range assignedPods {
-		//TODO Do for all containers
-		totalMemoryConsumed += (pod.Spec.Containers[0].Resources.Requests.Memory().MilliValue())
+	for _, pod := range targetNodeAssignedPods {
+		for _, container := range pod.Spec.Containers {
+			totalMemoryConsumed += container.Resources.Requests.Memory().MilliValue()
+		}
 		slog.Info("NodPodAssignment: ", "pod", pod.Name, "node", pod.Spec.NodeName, "memory", pod.Spec.Containers[0].Resources.Requests.Memory().MilliValue())
 	}
 
 	nodeScore.WasteRatio = float64(totalAllocatableMemory-totalMemoryConsumed) / float64(totalAllocatableMemory)
-
-	nodeScore.UnscheduledRatio = float64(len(podListForRun)-len(assignedPods)) / float64(len(podListForRun))
-
-	nodeScore.CostRatio = GetCostRatio(scaledNode, workerPools)
-
+	nodeScore.UnscheduledRatio = float64(len(podListForRun)-totalAssignedPods) / float64(len(podListForRun))
+	nodeScore.CostRatio = 1.5 * GetCostRatio(scaledNode, workerPools)
 	nodeScore.CumulativeScore = nodeScore.WasteRatio + nodeScore.UnscheduledRatio + nodeScore.CostRatio
 
 	for _, pool := range workerPools {

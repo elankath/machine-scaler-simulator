@@ -200,6 +200,20 @@ func (a *access) AddNodes(ctx context.Context, nodes ...*corev1.Node) error {
 			return err
 		}
 	}
+	nodeList := corev1.NodeList{}
+	err := a.client.List(ctx, &nodeList)
+	if err != nil {
+		return err
+	}
+	for _, node := range nodeList.Items {
+		slog.Info("node", "name", node.Name, "labels", node.Labels)
+		node.Labels["kubernetes.io/hostname"] = node.Name
+		err := a.client.Update(ctx, &node)
+		if err != nil {
+			slog.Error("cannot update node", "name", node.Name, "error", err)
+			return err
+		}
+	}
 	return nil
 }
 

@@ -162,11 +162,13 @@ type NodeRunResult struct {
 	UnscheduledRatio float64
 	CostRatio        float64
 	CumulativeScore  float64
-	NumAssignedPods  int
+	//NumAssignedPods  int
+	NumAssignedPodsToNode int
+	NumAssignedPodsTotal  int
 }
 
 func (n NodeRunResult) String() string {
-	return fmt.Sprintf("(Node: %s, WasteRatio: %.4f, UnscheduledRatio: %.4f, CostRatio: %.4f, CumulativeScore: %.4f, NumAssignedPods: %d)", n.NodeName, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore, n.NumAssignedPods)
+	return fmt.Sprintf("(Node: %s, WasteRatio: %.4f, UnscheduledRatio: %.4f, CostRatio: %.4f, CumulativeScore: %.4f, NumAssignedPodsToNode: %d, NumAssignedPodsTotal: %d)", n.NodeName, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore, n.NumAssignedPodsToNode, n.NumAssignedPodsTotal)
 }
 
 type AllPricing struct {
@@ -203,7 +205,7 @@ func (ns NodeRunResults) GetWinner() NodeRunResult {
 func (ns NodeRunResults) GetTotalAssignedPods() int {
 	var total int
 	for _, v := range ns {
-		total += v.NumAssignedPods
+		total += v.NumAssignedPodsToNode
 	}
 	return total
 }

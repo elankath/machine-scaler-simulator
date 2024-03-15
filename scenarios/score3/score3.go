@@ -49,7 +49,7 @@ func (s *scenarioScore3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	smallCount := webutil.GetIntQueryParam(r, "small", 10)
 	largeCount := webutil.GetIntQueryParam(r, "large", 1)
 
-	podSpecPath := "scenarios/c/podLarge.yaml"
+	podSpecPath := "scenarios/score3/podLarge.yaml"
 	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, largeCount))
 	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, largeCount)
 	if err != nil {
@@ -57,7 +57,7 @@ func (s *scenarioScore3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	podSpecPath = "scenarios/c/podSmall.yaml"
+	podSpecPath = "scenarios/score3/podSmall.yaml"
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
@@ -69,7 +69,6 @@ func (s *scenarioScore3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	//scaleStartTime := time.Now()
 	podListForRun, err := s.engine.VirtualClusterAccess().ListPods(r.Context())
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
@@ -111,11 +110,16 @@ func (s *scenarioScore3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			podListForRun = simutil.GetMatchingPods(allPods, podListForRun)
-			nodeScores[scaledNode.Name], err = simutil.ComputeNodeRunResult(r.Context(), s.engine.VirtualClusterAccess(), scaledNode, podListForRun, shoot.Spec.Provider.Workers)
+			nodeScore, err := simutil.ComputeNodeRunResult(scaledNode, podListForRun, shoot.Spec.Provider.Workers)
 			if err != nil {
 				webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 				return
 			}
+			if nodeScore.NumAssignedPodsToNode == 0 {
+				webutil.Log(w, "No pods are scheduled on the candidate scaled node "+scaledNode.Name+". This node group will not be considered in this run")
+				continue
+			}
+			nodeScores[scaledNode.Name] = nodeScore
 			webutil.Log(w, fmt.Sprintf("Node score for %s: %v", scaledNode.Name, nodeScores[scaledNode.Name]))
 			webutil.Log(w, "Deleting scaled node and clearing pod assignments...")
 			podListForRun, err = simutil.DeleteNodeAndResetPods(r.Context(), s.engine.VirtualClusterAccess(), scaledNode.Name, podListForRun)
@@ -144,6 +148,7 @@ func (s *scenarioScore3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		webutil.Log(w, "Waiting for 3 seconds for pod assignments to winning scalednode: "+scaledNode.Name)
 		time.Sleep(3 * time.Second)
+
 		assignedPods, err := simutil.GetPodsAssignedToNode(r.Context(), s.engine.VirtualClusterAccess(), scaledNode.Name)
 		if err != nil {
 			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error")

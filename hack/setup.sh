@@ -110,16 +110,16 @@ main() {
     popd > /dev/null
   fi
 
-  if [[ ! -f "$binaryAssetsDir/kube-controller-manager" ]]; then
-    echo -e "No kube-controller-manager binary in: $binaryAssetsDir"
-    echo "Building kube-controller-manager..."
-    pushd "$KUBE_SOURCE_DIR" > /dev/null
-    go build -v -o /tmp/kube-controller-manager cmd/kube-controller-manager/controller-manager.go
-    chmod +w "$binaryAssetsDir"
-    cp -v /tmp/kube-controller-manager "$binaryAssetsDir"
-    popd > /dev/null
-    ls -al "$binaryAssetsDir/kube-controller-manager"
-  fi
+#  if [[ ! -f "$binaryAssetsDir/kube-controller-manager" ]]; then
+#    echo -e "No kube-controller-manager binary in: $binaryAssetsDir"
+#    echo "Building kube-controller-manager..."
+#    pushd "$KUBE_SOURCE_DIR" > /dev/null
+#    go build -v -o /tmp/kube-controller-manager cmd/kube-controller-manager/controller-manager.go
+#    chmod +w "$binaryAssetsDir"
+#    cp -v /tmp/kube-controller-manager "$binaryAssetsDir"
+#    popd > /dev/null
+#    ls -al "$binaryAssetsDir/kube-controller-manager"
+#  fi
 
 
 #  kubeSchedulerBinaryUrl="https://dl.k8s.io/v1.29.1/bin/$GOOS/$GOARCH/kube-scheduler"
