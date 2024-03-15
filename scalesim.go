@@ -38,8 +38,11 @@ type VirtualClusterAccess interface {
 	// AddNodes adds the given slice of k8s Nodes to the virtual cluster
 	AddNodes(context.Context, ...*corev1.Node) error
 
-	// RemoveTaintFromVirtualNodes removed the NoSchedule taint from all nodes in the virtual cluster
+	// RemoveTaintFromVirtualNodes removes the NoSchedule taint from all nodes in the virtual cluster
 	RemoveTaintFromVirtualNodes(context.Context) error
+
+	// RemoveTaintFromVirtualNode removes the NoSchedule taint from the given node in the virtual cluster
+	RemoveTaintFromVirtualNode(context.Context, string) error
 
 	// CreatePods creates the given slice of k8s Pods in the virtual cluster
 	CreatePods(context.Context, string, ...corev1.Pod) error
@@ -168,7 +171,7 @@ type NodeRunResult struct {
 }
 
 func (n NodeRunResult) String() string {
-	return fmt.Sprintf("(Node: %s, WasteRatio: %.4f, UnscheduledRatio: %.4f, CostRatio: %.4f, CumulativeScore: %.4f, NumAssignedPodsToNode: %d, NumAssignedPodsTotal: %d)", n.NodeName, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore, n.NumAssignedPodsToNode, n.NumAssignedPodsTotal)
+	return fmt.Sprintf("(Worker: %s, WasteRatio: %.4f, UnscheduledRatio: %.4f, CostRatio: %.4f, CumulativeScore: %.4f, NumAssignedPodsToNode: %d, NumAssignedPodsTotal: %d)", n.Pool.Name, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore, n.NumAssignedPodsToNode, n.NumAssignedPodsTotal)
 }
 
 type AllPricing struct {

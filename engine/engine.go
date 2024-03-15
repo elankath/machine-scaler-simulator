@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/elankath/scaler-simulator/scenarios/score3"
+	"github.com/elankath/scaler-simulator/scenarios/score4"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -90,8 +90,8 @@ func (e *engine) addRoutes() {
 	scenarioP := p.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioP.Name(), scenarioP)
 
-	scenarioScore3 := score3.New(e)
-	e.mux.Handle("POST /scenarios/"+scenarioScore3.Name(), scenarioScore3)
+	scenarioScore4 := score4.New(e)
+	e.mux.Handle("POST /scenarios/"+scenarioScore4.Name(), scenarioScore4)
 
 }
 

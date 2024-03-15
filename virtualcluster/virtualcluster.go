@@ -261,18 +261,21 @@ func (a *access) RemoveTaintFromVirtualNodes(ctx context.Context) error {
 		if _, ok := no.Labels["app.kubernetes.io/existing-node"]; ok {
 			continue
 		}
-		node := corev1.Node{}
-		if err := a.client.Get(ctx, client.ObjectKeyFromObject(&no), &node); err != nil {
-			return err
-		}
-		patch := client.MergeFrom(node.DeepCopy())
-		node.Spec.Taints = nil
-
-		if err := a.client.Patch(ctx, &node, patch); err != nil {
+		if err := a.RemoveTaintFromVirtualNode(ctx, no.Name); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (a *access) RemoveTaintFromVirtualNode(ctx context.Context, nodeName string) error {
+	node := &corev1.Node{}
+	if err := a.client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		return err
+	}
+	patch := client.MergeFrom(node.DeepCopy())
+	node.Spec.Taints = nil
+	return a.client.Patch(ctx, node, patch)
 }
 
 func (a *access) ApplyK8sObject(ctx context.Context, k8sObjs ...runtime.Object) error {
