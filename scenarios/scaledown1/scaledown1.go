@@ -178,8 +178,7 @@ func (s *scenarioScaledown1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		adjustedPods := simutil.AdjustPods(assignedPods)
 		adjustedPodNames := simutil.PodNames(adjustedPods)
-		webutil.Log(w, fmt.Sprintf("Deploying adjusted Pods: %s", adjustedPodNames))
-		deployTime := time.Now()
+		webutil.Log(w, fmt.Sprintf("Deploying adjusted Pods...: %s", adjustedPodNames))
 		err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), virtualcluster.BinPackingSchedulerName, adjustedPods...)
 		if err != nil {
 			webutil.InternalError(w, err)
@@ -187,20 +186,15 @@ func (s *scenarioScaledown1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		//ignoring timeout err
 		var essentialNode bool
-		numUnscheduled, err := simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), 5*time.Second, deployTime)
+		//FIXME: fix this later
+		//numUnscheduled, err := simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), 10*time.Second, deployTime)
+		numUnscheduled, err := simutil.WaitAndGetUnscheduledPodCount(r.Context(), s.engine.VirtualClusterAccess(), 10)
+		webutil.Log(w, fmt.Sprintf("candidate node: %s, numUnscheduled: %d, after deployment of adjusted pods: %s, error (if any):  %s", n.Name, numUnscheduled, adjustedPodNames, err))
 		if err != nil {
-			webutil.Log(w, fmt.Sprintf("Timeout waiting for scheduling of Pods. This node: %s is deemed as essential", n.Name))
-			essentialNode = true
+			webutil.InternalError(w, err)
 		} else {
 			if numUnscheduled == 0 {
-				webutil.Log(w, fmt.Sprintf("Deleting Node %s since it can be removed safely", n.Name))
-				err := s.engine.VirtualClusterAccess().DeleteNode(r.Context(), n.Name)
-				if err != nil {
-					webutil.InternalError(w, err)
-					return
-				}
-				webutil.Log(w, fmt.Sprintf("Deleting Pods that were assigned to Node %s since it can be removed safely", n.Name))
-				err = s.engine.VirtualClusterAccess().DeletePods(r.Context(), assignedPods...)
+				err = simutil.DeleteNodeAndPods(r.Context(), w, s.engine.VirtualClusterAccess(), &n, assignedPods)
 				if err != nil {
 					webutil.InternalError(w, err)
 					return
@@ -212,12 +206,12 @@ func (s *scenarioScaledown1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if essentialNode {
-			err = s.engine.VirtualClusterAccess().RemoveTaintFromVirtualNode(r.Context(), n.Name)
+			err = s.engine.VirtualClusterAccess().DeletePods(r.Context(), adjustedPods...)
 			if err != nil {
 				webutil.InternalError(w, err)
 				return
 			}
-			err = s.engine.VirtualClusterAccess().DeletePods(r.Context(), adjustedPods...)
+			err = s.engine.VirtualClusterAccess().RemoveTaintFromVirtualNode(r.Context(), n.Name)
 			if err != nil {
 				webutil.InternalError(w, err)
 				return

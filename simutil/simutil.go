@@ -464,7 +464,7 @@ func DeleteAssignedPods(podListForRun []corev1.Pod, assignedPods []corev1.Pod) [
 
 func ComparePriceDescending(n1, n2 corev1.Node) int {
 	n1Type := n1.Labels["node.kubernetes.io/instance-type"]
-	n2Type := n1.Labels["node.kubernetes.io/instance-type"]
+	n2Type := n2.Labels["node.kubernetes.io/instance-type"]
 	n1Price := pricing.GetPricing(n1Type) // TODO: nil check later.
 	n2Price := pricing.GetPricing(n2Type)
 	return -cmp.Compare(n1Price, n2Price)
@@ -504,4 +504,20 @@ func PodNames(pods []corev1.Pod) []string {
 
 func IsExistingNode(n *corev1.Node) bool {
 	return n.Labels["app.kubernetes.io/existing-node"] == "true"
+}
+
+func DeleteNodeAndPods(ctx context.Context, w http.ResponseWriter, access scalesim.VirtualClusterAccess, node *corev1.Node, pods []corev1.Pod) error {
+	webutil.Log(w, fmt.Sprintf("Deleting Pods that were assigned to Node %s since it can be removed safely", node.Name))
+	err := access.DeletePods(ctx, pods...)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return err
+	}
+	webutil.Log(w, fmt.Sprintf("Deleting Node %s since it can be removed safely", node.Name))
+	err = access.DeleteNode(ctx, node.Name)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return err
+	}
+	return nil
 }
