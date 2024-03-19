@@ -74,7 +74,7 @@ func (r *Recommender) Run(ctx context.Context) (map[string]int, error) {
 			return recommendation, err
 		}
 		webutil.Log(r.logWriter, "Waiting for 5 seconds for pod assignments to winning scalednode: "+scaledNode.Name)
-		time.Sleep(5 * time.Second)
+		time.Sleep(5 * time.Second) //FIXME: remove sleeps and parallelize.
 
 		assignedPods, err := simutil.GetPodsAssignedToNode(ctx, r.engine.VirtualClusterAccess(), scaledNode.Name)
 		if err != nil {

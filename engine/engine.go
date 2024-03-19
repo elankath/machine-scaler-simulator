@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/elankath/scaler-simulator/scenarios/scaledown1"
 	"github.com/elankath/scaler-simulator/scenarios/score4"
 	"log/slog"
 	"net/http"
@@ -93,6 +94,8 @@ func (e *engine) addRoutes() {
 	scenarioScore4 := score4.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioScore4.Name(), scenarioScore4)
 
+	scenarioScaledown1 := scaledown1.New(e)
+	e.mux.Handle("POST /scenarios/"+scenarioScaledown1.Name(), scenarioScaledown1)
 }
 
 //func handleScenarioC(virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess) http.Handler {

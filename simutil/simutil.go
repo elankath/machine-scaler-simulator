@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/elankath/scaler-simulator/pricing"
+	"github.com/samber/lo"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -77,24 +79,26 @@ func PrintScheduledPodEvents(ctx context.Context, a scalesim.VirtualClusterAcces
 	return nil
 }
 
-func WaitTillNoUnscheduledPodsOrTimeout(ctx context.Context, access scalesim.VirtualClusterAccess, timeout time.Duration, since time.Time) error {
+func WaitTillNoUnscheduledPodsOrTimeout(ctx context.Context, access scalesim.VirtualClusterAccess, timeout time.Duration, since time.Time) (int, error) {
 	pollSecs := 2
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	numFailedUnscheduled := 0
 	for {
 		select {
 		case <-ctx.Done():
 			msg := "timeout waiting for unscheduled pods to get scheduled."
 			slog.Error(msg, "timeout", timeout, "error", ctx.Err())
-			return fmt.Errorf(msg+": %w", ctx.Err())
+			return numFailedUnscheduled, fmt.Errorf(msg+": %w", ctx.Err())
 		default:
 			eventList, err := GetFailedSchedulingEvents(ctx, access, since)
+			numFailedUnscheduled = len(eventList)
 			if err != nil {
-				return fmt.Errorf("cant get failed scheduling events due to: w", err)
+				return numFailedUnscheduled, fmt.Errorf("cant get failed scheduling events due to: w", err)
 			}
 			if len(eventList) == 0 {
 				slog.Info("no FailedScheduling events present.")
-				return nil
+				return numFailedUnscheduled, nil
 			}
 			slog.Info("wait before polling..", "waitSecs", 2)
 			<-time.After(time.Duration(pollSecs) * time.Second)
@@ -456,4 +460,48 @@ func DeleteAssignedPods(podListForRun []corev1.Pod, assignedPods []corev1.Pod) [
 		_, ok := assignedPodsByName[p.Name]
 		return ok
 	})
+}
+
+func ComparePriceDescending(n1, n2 corev1.Node) int {
+	n1Type := n1.Labels["node.kubernetes.io/instance-type"]
+	n2Type := n1.Labels["node.kubernetes.io/instance-type"]
+	n1Price := pricing.GetPricing(n1Type) // TODO: nil check later.
+	n2Price := pricing.GetPricing(n2Type)
+	return -cmp.Compare(n1Price, n2Price)
+}
+
+func GetPodsOnNode(ctx context.Context, virtualAccess scalesim.VirtualClusterAccess, nodeName string) ([]corev1.Pod, error) {
+	pods, err := virtualAccess.ListPods(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var matchingPods []corev1.Pod
+	for _, p := range pods {
+		if p.Spec.NodeName == nodeName {
+			matchingPods = append(matchingPods, p)
+		}
+	}
+	return matchingPods, nil
+}
+
+func AdjustPods(pods []corev1.Pod) []corev1.Pod {
+	var adjustedPods []corev1.Pod
+	for i, p := range pods {
+		ap := p.DeepCopy()
+		ap.Name = fmt.Sprintf("%s-%d", p.Name, i)
+		ap.Spec.NodeName = ""
+		ap.ObjectMeta.GenerateName = ""
+		adjustedPods = append(adjustedPods, *ap)
+	}
+	return adjustedPods
+}
+
+func PodNames(pods []corev1.Pod) []string {
+	return lo.Map(pods, func(item corev1.Pod, index int) string {
+		return item.Name
+	})
+}
+
+func IsExistingNode(n *corev1.Node) bool {
+	return n.Labels["app.kubernetes.io/existing-node"] == "true"
 }

@@ -88,7 +88,7 @@ func (s *scenarioD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	timeoutSecs := 30 * time.Second
 	webutil.Logf(w, "Waiting till there are no unschedulable pods or timeout of %.2f secs", timeoutSecs.Seconds())
-	err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs, scaleStartTime)
+	_, err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs, scaleStartTime)
 	if err != nil { // TODO: too much repetition move this to scenarios as utility function
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)

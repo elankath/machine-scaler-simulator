@@ -44,6 +44,9 @@ type VirtualClusterAccess interface {
 	// RemoveTaintFromVirtualNode removes the NoSchedule taint from the given node in the virtual cluster
 	RemoveTaintFromVirtualNode(context.Context, string) error
 
+	// AddTaintToNode adds the NoSchedule taint from the given node in the virtual cluster
+	AddTaintToNode(context.Context, *corev1.Node) error
+
 	// CreatePods creates the given slice of k8s Pods in the virtual cluster
 	CreatePods(context.Context, string, ...corev1.Pod) error
 

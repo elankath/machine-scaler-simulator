@@ -268,6 +268,16 @@ func (a *access) RemoveTaintFromVirtualNodes(ctx context.Context) error {
 	return nil
 }
 
+func (a *access) AddTaintToNode(ctx context.Context, node *corev1.Node) error {
+	adjustedNode := node.DeepCopy()
+	adjustedNode.Spec.Taints = append(node.Spec.Taints, corev1.Taint{
+		Key:    "app.kubernetes.io/mark-inactive",
+		Value:  "NoSchedule",
+		Effect: corev1.TaintEffectNoSchedule,
+	})
+	return a.client.Update(ctx, adjustedNode)
+}
+
 func (a *access) RemoveTaintFromVirtualNode(ctx context.Context, nodeName string) error {
 	node := &corev1.Node{}
 	if err := a.client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
