@@ -51,6 +51,10 @@ func (a *access) DeletePods(ctx context.Context, pods ...corev1.Pod) error {
 	return nil
 }
 
+func (a *access) DeletePodsWithMatchingLabels(ctx context.Context, labels map[string]string) error {
+	return a.client.DeleteAllOf(ctx, &corev1.Pod{}, client.MatchingLabels(labels))
+}
+
 func (a *access) UpdatePods(ctx context.Context, pods ...corev1.Pod) error {
 	for _, pod := range pods {
 		err := a.client.Update(ctx, &pod)
@@ -83,6 +87,11 @@ func (a *access) DeleteNode(ctx context.Context, name string) error {
 	}
 	return nil
 }
+
+func (a *access) DeleteNodesWithMatchingLabels(ctx context.Context, labels map[string]string) error {
+	return a.client.DeleteAllOf(ctx, &corev1.Node{}, client.MatchingLabels(labels))
+}
+
 func (a *access) CreatePods(ctx context.Context, schedulerName string, pods ...corev1.Pod) error {
 	for _, pod := range pods {
 		var podObjMeta metav1.ObjectMeta
@@ -231,6 +240,15 @@ func (a *access) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList); err != nil {
 		slog.Error("cannot list nodes", "error", err)
+		return nil, err
+	}
+	return nodeList.Items, nil
+}
+
+func (a *access) ListNodesMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Node, error) {
+	nodeList := corev1.NodeList{}
+	if err := a.client.List(ctx, &nodeList, client.MatchingLabels(labels)); err != nil {
+		slog.Error("cannot list nodes with matching labels", "labels", labels, "error", err)
 		return nil, err
 	}
 	return nodeList.Items, nil

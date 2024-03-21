@@ -87,6 +87,12 @@ type VirtualClusterAccess interface {
 	DeleteNode(ctx context.Context, name string) error
 
 	DeletePods(ctx context.Context, pods ...corev1.Pod) error
+
+	DeleteNodesWithMatchingLabels(ctx context.Context, labels map[string]string) error
+
+	DeletePodsWithMatchingLabels(ctx context.Context, labels map[string]string) error
+
+	ListNodesMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Node, error)
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster
