@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strconv"
 	"sync"
 
 	scalesim "github.com/elankath/scaler-simulator"
@@ -72,7 +73,7 @@ func (r *Recommender) Run(ctx context.Context) (Recommendation, error) {
 	if err != nil {
 		return recommendation, err
 	}
-	var runCounter int
+	var runNumber int
 	shoot, err := r.getShoot()
 	if err != nil {
 		webutil.InternalError(r.logWriter, err)
@@ -80,13 +81,13 @@ func (r *Recommender) Run(ctx context.Context) (Recommendation, error) {
 	}
 	var winningNodeResult *scalesim.NodeRunResult
 	for {
-		runCounter++
-		webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d started...", runCounter))
+		runNumber++
+		webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d started...", runNumber))
 		if len(unscheduledPods) == 0 {
 			webutil.Log(r.logWriter, "All pods are scheduled. Exiting the loop...")
 			break
 		}
-		winningNodeResult, unscheduledPods, err = r.runSimulation(ctx, shoot, unscheduledPods)
+		winningNodeResult, unscheduledPods, err = r.runSimulation(ctx, shoot, unscheduledPods, runNumber)
 		if err != nil {
 			webutil.Log(r.logWriter, fmt.Sprintf("Unable to get eligible node pools for shoot %s, err: %v", shoot.Name, err))
 			break
@@ -95,7 +96,7 @@ func (r *Recommender) Run(ctx context.Context) (Recommendation, error) {
 			webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d, no winner could be identified. This will happen when no pods could be assgined. No more runs are required, exiting early", runCounter))
 			break
 		}
-		webutil.Log(r.logWriter, fmt.Sprintf("For scale-up recommender run #%d, winning score is: %v", runCounter, winningNodeResult))
+		webutil.Log(r.logWriter, fmt.Sprintf("For scale-up recommender run #%d, winning score is: %v", runNumber, winningNodeResult))
 	}
 
 	return recommendation, nil
@@ -115,7 +116,7 @@ func (r *Recommender) getShoot() (*v1beta1.Shoot, error) {
 // 1 pod will get assigned to A. 5 pending. 3 Nodes will be scale up. (1-a, 1-b, 1-c)
 // if you count existing nodes and pods, then only 2 nodes are needed.
 
-func (r *Recommender) runSimulation(ctx context.Context, shoot *v1beta1.Shoot, pods []corev1.Pod) (*scalesim.NodeRunResult, []corev1.Pod, error) {
+func (r *Recommender) runSimulation(ctx context.Context, shoot *v1beta1.Shoot, pods []corev1.Pod, runNum int) (*scalesim.NodeRunResult, []corev1.Pod, error) {
 	/*
 		    1. getEligibleNodePools
 			2. For each nodePool, start a go routine. Each go routine will return a node score.
@@ -140,7 +141,7 @@ func (r *Recommender) runSimulation(ctx context.Context, shoot *v1beta1.Shoot, p
 	var results []runResult
 
 	resultCh := make(chan runResult, len(eligibleNodePools))
-	go r.triggerNodePoolSimulations(eligibleNodePools, resultCh)
+	go r.triggerNodePoolSimulations(ctx, eligibleNodePools, resultCh, runNum)
 
 	// label, taint, result chan, error chan, close chan
 	var errs error
@@ -158,18 +159,44 @@ func (r *Recommender) runSimulation(ctx context.Context, shoot *v1beta1.Shoot, p
 	return &winningResult.result, winningResult.unscheduledPods, nil
 }
 
-func (r *Recommender) triggerNodePoolSimulations(nodePools []scalesim.NodePool, resultCh chan runResult) {
+func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, nodePools []scalesim.NodePool, resultCh chan runResult, runNum int) {
 	wg := &sync.WaitGroup{}
 	for _, nodePool := range nodePools {
 		wg.Add(1)
-		go r.runSimulationForNodePool(wg, nodePool, resultCh)
+		go r.runSimulationForNodePool(ctx, wg, nodePool, resultCh, runNum)
 	}
 	wg.Wait()
 	close(resultCh)
 }
 
-func (r *Recommender) runSimulationForNodePool(wg *sync.WaitGroup, nodePool scalesim.NodePool, resultCh chan runResult) {
+func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.WaitGroup, nodePool scalesim.NodePool, resultCh chan runResult, runNum int) {
 	defer wg.Done()
+	runRes := runResult{}
+
+	labelKey := "app.kubernetes.io/simulation-run"
+	labelValue := nodePool.Name + "-" + strconv.Itoa(runNum)
+
+	nodes, err := r.engine.VirtualClusterAccess().ListNodes(ctx)
+	if err != nil {
+		runRes.err = err
+		resultCh <- runRes
+		return
+	}
+	var NodeList []*corev1.Node
+	for _, node := range nodes {
+		nodeCopy := node.DeepCopy()
+		nodeCopy.Name = node.Name + "SimRun-" + labelValue
+		nodeCopy.Labels[labelKey] = labelValue
+		NodeList = append(NodeList, nodeCopy)
+	}
+	r.engine.VirtualClusterAccess().AddNodes(ctx, NodeList...)
+
+	pods, err := r.engine.VirtualClusterAccess().ListPods(ctx)
+	if err != nil {
+		runRes.err = err
+		resultCh <- runRes
+		return
+	}
 
 }
 

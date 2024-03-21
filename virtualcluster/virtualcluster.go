@@ -61,6 +61,16 @@ func (a *access) UpdatePods(ctx context.Context, pods ...corev1.Pod) error {
 	return nil
 }
 
+func (a *access) UpdateNodes(ctx context.Context, nodes ...corev1.Node) error {
+	for _, node := range nodes {
+		err := a.client.Update(ctx, &node)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *access) DeleteNode(ctx context.Context, name string) error {
 	node := corev1.Node{}
 	err := a.client.Get(ctx, types.NamespacedName{Name: name}, &node)

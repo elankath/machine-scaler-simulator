@@ -62,6 +62,9 @@ type VirtualClusterAccess interface {
 	// ClearNodes  clears all nodes from the virtual cluster
 	ClearNodes(context.Context) error
 
+	// UpdateNodes updated nodes in the virtual cluster
+	UpdateNodes(ctx context.Context, nodes ...corev1.Node) error
+
 	// ClearPods clears all nodes from the virtual cluster
 	ClearPods(context.Context) error
 
