@@ -71,6 +71,7 @@ type VirtualClusterAccess interface {
 	GetPod(ctx context.Context, fullName types.NamespacedName) (*corev1.Pod, error)
 	ListEvents(cts context.Context) ([]corev1.Event, error)
 	ListNodes(ctx context.Context) ([]corev1.Node, error)
+	ListMirroredLiveNodesFromShoot(ctx context.Context) ([]corev1.Node, error)
 
 	// ListPods lists all pods from all namespaces
 	ListPods(ctx context.Context) ([]corev1.Pod, error)

@@ -3,10 +3,11 @@ package nodescorer
 import (
 	"context"
 	"fmt"
-	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/simutil"
@@ -116,6 +117,10 @@ func (r *Recommender) computeNodeScores(ctx context.Context, candidatePods []cor
 		if err != nil {
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
 			return nil, candidatePods
+		}
+		if scaledNode == nil {
+			webutil.Log(r.logWriter, "No new node can be created for pool "+pool.Name+" as it has reached its max. Skipping this pool.")
+			continue
 		}
 		webutil.Log(r.logWriter, "Waiting for 5 seconds before calculating node score...")
 		time.Sleep(5 * time.Second)

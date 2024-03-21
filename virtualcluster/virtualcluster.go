@@ -226,6 +226,15 @@ func (a *access) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	return nodeList.Items, nil
 }
 
+func (a *access) ListMirroredLiveNodesFromShoot(ctx context.Context) ([]corev1.Node, error) {
+	nodeList := corev1.NodeList{}
+	if err := a.client.List(ctx, &nodeList, client.MatchingLabels{"app.kubernetes.io/existing-node": "true"}); err != nil {
+		slog.Error("cannot list nodes", "error", err)
+		return nil, err
+	}
+	return nodeList.Items, nil
+}
+
 func (a *access) ListPods(ctx context.Context) ([]corev1.Pod, error) {
 	podList := corev1.PodList{}
 	if err := a.client.List(ctx, &podList); err != nil {
