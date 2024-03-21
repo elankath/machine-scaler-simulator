@@ -71,7 +71,7 @@ type VirtualClusterAccess interface {
 	GetPod(ctx context.Context, fullName types.NamespacedName) (*corev1.Pod, error)
 	ListEvents(cts context.Context) ([]corev1.Event, error)
 	ListNodes(ctx context.Context) ([]corev1.Node, error)
-	ListMirroredLiveNodesFromShoot(ctx context.Context) ([]corev1.Node, error)
+	ListNodesInNodePool(ctx context.Context, nodePoolName string) ([]corev1.Node, error)
 
 	// ListPods lists all pods from all namespaces
 	ListPods(ctx context.Context) ([]corev1.Pod, error)
@@ -128,6 +128,15 @@ type Scenario interface {
 	Name() string
 	//ShootName is the name of the shoot that the scenario executes against
 	ShootName() string
+}
+
+// NodePool describes a worker pool in the shoot.
+type NodePool struct {
+	Name        string
+	Zones       []string
+	Max         int32
+	Current     int32
+	MachineType string
 }
 
 type NodePodAssignment struct {

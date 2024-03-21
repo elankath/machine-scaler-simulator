@@ -2,9 +2,11 @@ package recommender
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
+	"sync"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/webutil"
@@ -16,12 +18,12 @@ import (
 	for {
 		unscheduledPods = determine unscheduled pods
 		if noUnscheduledPods then exit early
-		- runSimulationAndDetermineWinner
- 		  - Start a go-routine for each of candidate node-group which are eligible
-				- eligibility: max is not yet reached for that node-group
+		- runSimulation
+ 		  - Start a go-routine for each of candidate nodePool which are eligible
+				- eligibility: max is not yet reached for that nodePool
               For each go-routine:
                 Setup:
-                    - create a unique that will get added to all nodes and pods
+                    - create a unique label that will get added to all nodes and pods
                 	- copy previous winner nodes and a taint.
                 	- copy the deployed pods with node names assigned and add toleration to the taint.
 	            - scale up one node, add a taint and only copy of pods will have toleration to that taint.
@@ -47,10 +49,10 @@ type Recommender struct {
 	logWriter       http.ResponseWriter
 }
 
-type nodePool struct {
-	name string
-	zone string
-	max  int
+type runResult struct {
+	result          scalesim.NodeRunResult
+	unscheduledPods []corev1.Pod
+	err             error
 }
 
 func NewRecommender(engine scalesim.Engine, shootNodes []corev1.Node, scenarioName, shootName string, strategyWeights StrategyWeights, logWriter http.ResponseWriter) *Recommender {
@@ -76,6 +78,7 @@ func (r *Recommender) Run(ctx context.Context) (Recommendation, error) {
 		webutil.InternalError(r.logWriter, err)
 		return recommendation, err
 	}
+	var winningNodeResult *scalesim.NodeRunResult
 	for {
 		runCounter++
 		webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d started...", runCounter))
@@ -83,14 +86,16 @@ func (r *Recommender) Run(ctx context.Context) (Recommendation, error) {
 			webutil.Log(r.logWriter, "All pods are scheduled. Exiting the loop...")
 			break
 		}
-		nodeScores, unscheduledPods := r.runSimulationAndDetermineWinner(ctx, shoot, unscheduledPods)
-		if len(nodeScores) == 0 {
+		winningNodeResult, unscheduledPods, err = r.runSimulation(ctx, shoot, unscheduledPods)
+		if err != nil {
+			webutil.Log(r.logWriter, fmt.Sprintf("Unable to get eligible node pools for shoot %s, err: %v", shoot.Name, err))
+			break
+		}
+		if winningNodeResult == nil {
 			webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d, no winner could be identified. This will happen when no pods could be assgined. No more runs are required, exiting early", runCounter))
 			break
 		}
-		winningNodeScore := getWinner(nodeScores)
-		webutil.Log(r.logWriter, fmt.Sprintf("For scale-up recommender run #%d, winning score is: %v", runCounter, winningNodeScore))
-
+		webutil.Log(r.logWriter, fmt.Sprintf("For scale-up recommender run #%d, winning score is: %v", runCounter, winningNodeResult))
 	}
 
 	return recommendation, nil
@@ -104,21 +109,99 @@ func (r *Recommender) getShoot() (*v1beta1.Shoot, error) {
 	return shoot, nil
 }
 
-func (r *Recommender) runSimulationAndDetermineWinner(ctx context.Context, shoot *v1beta1.Shoot, pods []corev1.Pod) ([]scalesim.NodeRunResult, []corev1.Pod) {
-	return nil, nil
+// TODO: sync existing nodes and pods deployed on them. DO NOT TAINT THESE NODES.
+// eg:- 1 node(A) existing in zone a. Any node can only fit 2 pods.
+// deployment 6 replicas, tsc zone, minDomains 3
+// 1 pod will get assigned to A. 5 pending. 3 Nodes will be scale up. (1-a, 1-b, 1-c)
+// if you count existing nodes and pods, then only 2 nodes are needed.
+
+func (r *Recommender) runSimulation(ctx context.Context, shoot *v1beta1.Shoot, pods []corev1.Pod) (*scalesim.NodeRunResult, []corev1.Pod, error) {
+	/*
+		    1. getEligibleNodePools
+			2. For each nodePool, start a go routine. Each go routine will return a node score.
+			3. Collect the scores and return
+
+			Inside each go routine:-
+				1. Setup:-
+					 - create a unique label that will get added to all nodes and pods (for helping in clean up)
+				     - copy previous winner nodes and add a taint.
+		             - copy the deployed pods with node names assigned and add a toleration to the taint.
+				2. For each zone in the nodePool:-
+					- scale up one node
+					- wait for assignment of pods (5 sec delay),
+					- calculate the score.
+			    	- Reset the state
+			    3. Compute the winning score for this nodePool and push to the result channel.
+	*/
+	eligibleNodePools, err := r.getEligibleNodePools(ctx, shoot)
+	if err != nil {
+		return nil, nil, err
+	}
+	var results []runResult
+
+	resultCh := make(chan runResult, len(eligibleNodePools))
+	go r.triggerNodePoolSimulations(eligibleNodePools, resultCh)
+
+	// label, taint, result chan, error chan, close chan
+	var errs error
+	for result := range resultCh {
+		if result.err != nil {
+			_ = errors.Join(errs, err)
+		} else {
+			results = append(results, result)
+		}
+	}
+	if errs != nil {
+		return nil, nil, err
+	}
+	winningResult := getWinner(results)
+	return &winningResult.result, winningResult.unscheduledPods, nil
 }
 
-func (r *Recommender) getEligibleNodePools(shoot *v1beta1.Shoot) []nodePool {
-	return nil
+func (r *Recommender) triggerNodePoolSimulations(nodePools []scalesim.NodePool, resultCh chan runResult) {
+	wg := &sync.WaitGroup{}
+	for _, nodePool := range nodePools {
+		wg.Add(1)
+		go r.runSimulationForNodePool(wg, nodePool, resultCh)
+	}
+	wg.Wait()
+	close(resultCh)
 }
 
-func getWinner(ns []scalesim.NodeRunResult) scalesim.NodeRunResult {
-	var winner scalesim.NodeRunResult
+func (r *Recommender) runSimulationForNodePool(wg *sync.WaitGroup, nodePool scalesim.NodePool, resultCh chan runResult) {
+	defer wg.Done()
+
+}
+
+func (r *Recommender) getEligibleNodePools(ctx context.Context, shoot *v1beta1.Shoot) ([]scalesim.NodePool, error) {
+	eligibleNodePools := make([]scalesim.NodePool, 0, len(shoot.Spec.Provider.Workers))
+	for _, worker := range shoot.Spec.Provider.Workers {
+		nodes, err := r.engine.VirtualClusterAccess().ListNodesInNodePool(ctx, worker.Name)
+		if err != nil {
+			return nil, err
+		}
+		if int32(len(nodes)) >= worker.Maximum {
+			continue
+		}
+		nodePool := scalesim.NodePool{
+			Name:        worker.Name,
+			Zones:       worker.Zones,
+			Max:         worker.Maximum,
+			Current:     int32(len(nodes)),
+			MachineType: worker.Machine.Type,
+		}
+		eligibleNodePools = append(eligibleNodePools, nodePool)
+	}
+	return eligibleNodePools, nil
+}
+
+func getWinner(results []runResult) runResult {
+	var winner runResult
 	minScore := math.MaxFloat64
-	for _, v := range ns {
-		if v.CumulativeScore < minScore {
+	for _, v := range results {
+		if v.result.CumulativeScore < minScore {
 			winner = v
-			minScore = v.CumulativeScore
+			minScore = v.result.CumulativeScore
 		}
 	}
 	return winner

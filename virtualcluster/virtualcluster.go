@@ -226,9 +226,9 @@ func (a *access) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	return nodeList.Items, nil
 }
 
-func (a *access) ListMirroredLiveNodesFromShoot(ctx context.Context) ([]corev1.Node, error) {
+func (a *access) ListNodesInNodePool(ctx context.Context, nodePoolName string) ([]corev1.Node, error) {
 	nodeList := corev1.NodeList{}
-	if err := a.client.List(ctx, &nodeList, client.MatchingLabels{"app.kubernetes.io/existing-node": "true"}); err != nil {
+	if err := a.client.List(ctx, &nodeList, client.MatchingLabels{"worker.gardener.cloud/pool": nodePoolName}); err != nil {
 		slog.Error("cannot list nodes", "error", err)
 		return nil, err
 	}

@@ -10,7 +10,7 @@ require (
 	sigs.k8s.io/controller-runtime v0.17.1
 )
 
-require github.com/samber/lo v1.39.0 // indirect
+require github.com/samber/lo v1.39.0
 
 require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
