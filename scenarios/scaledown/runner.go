@@ -53,7 +53,7 @@ func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter) {
 		webutil.InternalError(w, err)
 		return
 	}
-	s.printPodDeploymentRecommendations(ctx, w)
+	s.printNodePodAssignments(ctx, w)
 
 	nodes, err := s.engine.VirtualClusterAccess().ListNodes(ctx)
 	if err != nil {
@@ -70,20 +70,13 @@ func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter) {
 	webutil.Log(w, "Scenario-End: "+s.scenarioName)
 }
 
-func (s ScenarioRunner) printPodDeploymentRecommendations(ctx context.Context, w http.ResponseWriter) {
+func (s ScenarioRunner) printNodePodAssignments(ctx context.Context, w http.ResponseWriter) {
 	nodePodAssignments, err := simutil.GetNodePodAssignments(ctx, s.engine.VirtualClusterAccess())
 	webutil.Log(w, fmt.Sprintf("NodePodAssignments BEFORE Scale-Down are: %s", nodePodAssignments))
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
 	}
-	recommendation, err := simutil.GetScalerRecommendation(ctx, s.engine.VirtualClusterAccess(), nodePodAssignments)
-	if err != nil {
-		webutil.Log(w, "Execution of scenario: "+s.scenarioName+" completed with error: "+err.Error())
-		slog.Error("Execution of scenario: "+s.scenarioName+" ran into error", "error", err)
-		return
-	}
-	webutil.Log(w, "Recommendation for Scaleup: "+recommendation.String())
 }
 
 func (s ScenarioRunner) deployPods(ctx context.Context, w http.ResponseWriter, podRequests map[string]int) error {

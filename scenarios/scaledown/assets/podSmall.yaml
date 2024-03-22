@@ -4,7 +4,7 @@ metadata:
   generateName: scenario-c-small-
   namespace: default
   labels:
-    app.kubernetes.io/name: "scenario-c"
+    app.kubernetes.io/name: "simplescenario"
 spec:
   schedulerName: default-scheduler
   terminationGracePeriodSeconds: 0

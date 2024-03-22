@@ -189,7 +189,7 @@ func (s *scenarioScaledown1) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		//FIXME: fix this later
 		//numUnscheduled, err := simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), 10*time.Second, deployTime)
 		numUnscheduled, err := simutil.WaitAndGetUnscheduledPodCount(r.Context(), s.engine.VirtualClusterAccess(), 10)
-		webutil.Log(w, fmt.Sprintf("candidate node: %s, numUnscheduled: %d, after deployment of adjusted pods: %s, error (if any):  %s", n.Name, numUnscheduled, adjustedPodNames, err))
+		webutil.Log(w, fmt.Sprintf("candidate node: %s, numUnscheduled: %d, after deployment of adjusted pods: %s, error (if any):  %v", n.Name, numUnscheduled, adjustedPodNames, err))
 		if err != nil {
 			webutil.InternalError(w, err)
 		} else {

@@ -4,7 +4,7 @@ metadata:
   generateName: score3-large-
   namespace: default
   labels:
-    app.kubernetes.io/name: "score3"
+    app.kubernetes.io/name: "tscscenario"
     foo: bar2
 spec:
   schedulerName: bin-packing-scheduler

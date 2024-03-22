@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/elankath/scaler-simulator/scenarios/scaledown/simplescenario"
+	"github.com/elankath/scaler-simulator/scenarios/scaledown/tscscenario"
 	"github.com/elankath/scaler-simulator/scenarios/scaledown1"
 	"github.com/elankath/scaler-simulator/scenarios/score4"
 	"log/slog"
@@ -96,6 +98,12 @@ func (e *engine) addRoutes() {
 
 	scenarioScaledown1 := scaledown1.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioScaledown1.Name(), scenarioScaledown1)
+
+	scenarioScaledownSimple := simplescenario.New(e)
+	e.mux.Handle("POST /scenarios/scaledown/"+scenarioScaledownSimple.Name(), scenarioScaledownSimple)
+
+	scenarioScaledownTSC := tscscenario.New(e)
+	e.mux.Handle("POST /scenarios/scaledown/"+scenarioScaledownTSC.Name(), scenarioScaledownTSC)
 }
 
 //func handleScenarioC(virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess) http.Handler {
