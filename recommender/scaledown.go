@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"time"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/simutil"
@@ -44,23 +45,33 @@ func ScaleDownOrderedByDescendingCost(ctx context.Context, vca scalesim.VirtualC
 		}
 		if len(assignedPods) == 0 {
 			deletableNodeNames = append(deletableNodeNames, n.Name)
+			webutil.Log(w, fmt.Sprintf("Node %s has no pods. Deleting the node", n.Name))
+			if err = vca.DeleteNode(ctx, n.Name); err != nil {
+				return deletableNodeNames, err
+			}
 			continue
 		}
 
 		adjustedPods := simutil.AdjustPods(assignedPods)
 		adjustedPodNames := simutil.PodNames(adjustedPods)
 		webutil.Log(w, fmt.Sprintf("Deploying adjusted Pods...: %s", adjustedPodNames))
+		deployStartTime := time.Now()
 		if err = vca.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, adjustedPods...); err != nil {
 			return deletableNodeNames, err
 		}
 
 		var essentialNode bool
 		numUnscheduled, err := simutil.WaitAndGetUnscheduledPodCount(ctx, vca, 10)
-		webutil.Log(w, fmt.Sprintf("candidate node: %s, numUnscheduledPods: %d, after deployment of adjusted pods: %s, error (if any):  %s", n.Name, numUnscheduled, adjustedPodNames, err))
+		webutil.Log(w, fmt.Sprintf("candidate node: %s, numUnscheduledPods: %d, after deployment of adjusted pods: %s, error (if any):  %v", n.Name, numUnscheduled, adjustedPodNames, err))
 		if err != nil {
 			return deletableNodeNames, err
 		} else {
+			err = simutil.PrintScheduledPodEvents(ctx, vca, deployStartTime, w)
+			if err != nil {
+				webutil.Log(w, "Error while printing scheduled pod events")
+			}
 			if numUnscheduled == 0 {
+				//TODO : Recommender should not do the actual deletion of nodes. It should only recommend.
 				if err = simutil.DeleteNodeAndPods(ctx, w, vca, &n, assignedPods); err != nil {
 					return deletableNodeNames, err
 				}

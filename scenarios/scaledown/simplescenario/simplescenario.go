@@ -1,6 +1,7 @@
-package scaledown
+package simplescenario
 
 import (
+	"github.com/elankath/scaler-simulator/scenarios/scaledown"
 	"net/http"
 
 	scalesim "github.com/elankath/scaler-simulator"
@@ -9,7 +10,7 @@ import (
 
 var (
 	shootName    = "scenario-c"
-	scenarioName = "scaledown1"
+	scenarioName = "simple"
 )
 
 const (
@@ -37,7 +38,7 @@ func (s *simpleScaleDown) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		smallPodPath: smallCount,
 		largePodPath: largeCount,
 	}
-	NewScenarioRunner(s.engine, shootName, scenarioName, podRequests).Run(r.Context(), w)
+	scaledown.NewScenarioRunner(s.engine, shootName, scenarioName, podRequests).Run(r.Context(), w)
 }
 
 var _ scalesim.Scenario = (*simpleScaleDown)(nil)
