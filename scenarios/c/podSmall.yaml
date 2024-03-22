@@ -4,8 +4,7 @@ metadata:
   generateName: scenario-c-small-
   namespace: default
   labels:
-    app.kubernetes.io/name: "scenario-c-small"
-    foo: bar
+    app.kubernetes.io/name: "scenario-c"
 spec:
   schedulerName: bin-packing-scheduler
   terminationGracePeriodSeconds: 0
@@ -16,40 +15,3 @@ spec:
         requests:
           cpu: 100m
           memory: 5Gi
-  topologySpreadConstraints:
-    - maxSkew: 1
-      topologyKey: failure-domain.beta.kubernetes.io/zone
-      whenUnsatisfiable: DoNotSchedule
-      labelSelector:
-        matchLabels:
-          foo: bar
-  affinity:
-    nodeAffinity:
-      preferredDuringSchedulingIgnoredDuringExecution:
-        - weight: 1  # small-size pool
-          preference:
-            matchExpressions:
-              - key: worker.gardener.cloud/pool
-                operator: In
-                values:
-                  - p1 # name of pool
-        - weight: 2  # med-size pool
-          preference:
-            matchExpressions:
-              - key: worker.gardener.cloud/pool
-                operator: In
-                values:
-                  - p2  # name of pool
-        - weight: 3  # large-size pool
-          preference:
-            matchExpressions:
-              - key: worker.gardener.cloud/pool
-                operator: In
-                values:
-                  - p3  # name of pool
-
-
-
-
-
-
