@@ -269,7 +269,7 @@ func (r *Recommender) setupNodePoolSimRun(ctx context.Context, labelKey, labelVa
 		}
 		podList = append(podList, *podCopy)
 	}
-	return r.engine.VirtualClusterAccess().CreatePods(ctx, "bin-packing", podList...)
+	return r.engine.VirtualClusterAccess().CreatePods(ctx, "bin-packing", "", podList...)
 }
 
 func (r *Recommender) resetNodePoolSimRun(ctx context.Context, labelKey, labelValue string) error {

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"github.com/elankath/scaler-simulator/scenarios/scaledown/simplescenario"
 	"github.com/elankath/scaler-simulator/scenarios/scaledown/tscscenario"
-	"github.com/elankath/scaler-simulator/scenarios/scaledown1"
 	"github.com/elankath/scaler-simulator/scenarios/score4"
 	"log/slog"
 	"net/http"
@@ -96,36 +95,12 @@ func (e *engine) addRoutes() {
 	scenarioScore4 := score4.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioScore4.Name(), scenarioScore4)
 
-	scenarioScaledown1 := scaledown1.New(e)
-	e.mux.Handle("POST /scenarios/"+scenarioScaledown1.Name(), scenarioScaledown1)
-
 	scenarioScaledownSimple := simplescenario.New(e)
 	e.mux.Handle("POST /scenarios/scaledown/"+scenarioScaledownSimple.Name(), scenarioScaledownSimple)
 
 	scenarioScaledownTSC := tscscenario.New(e)
 	e.mux.Handle("POST /scenarios/scaledown/"+scenarioScaledownTSC.Name(), scenarioScaledownTSC)
 }
-
-//func handleScenarioC(virtualAccess scalesim.VirtualClusterAccess, shootAccess scalesim.ShootAccess) http.Handler {
-//	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-//		webutil.SetupSSEWriter(w)
-//		podCountAstr := r.URL.Query().Get("podCountA")
-//		podCountBstr := r.URL.Query().Get("podCountB")
-//		podCountA, err := strconv.Atoi(podCountAstr)
-//		if err != nil {
-//			slog.Error("Error converting podCountA to int", "error", err)
-//			return
-//		}
-//		podCountB, err := strconv.Atoi(podCountBstr)
-//		if err != nil {
-//			slog.Error("Error converting podCountB to int", "error", err)
-//			return
-//		}
-//		webutil.Log(w, fmt.Sprintf("handling scenario C\n"))
-//
-//		scenarios.NewScenarioC(r.Context(), virtualAccess, shootAccess, w, podCountA, podCountB)
-//	})
-//}
 
 func (e *engine) handleSyncShootNodes() http.Handler {
 	return http.HandlerFunc(

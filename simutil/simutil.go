@@ -386,7 +386,7 @@ func ApplyDsPodsToNodes(ctx context.Context, v scalesim.VirtualClusterAccess, ds
 			deployablePods = append(deployablePods, p)
 		}
 		slog.Info("Creating DS pods for node", "node", node.Name, "numPods", len(deployablePods))
-		err = v.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, deployablePods...)
+		err = v.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, "", deployablePods...)
 		if err != nil {
 			return err
 		}
@@ -420,7 +420,7 @@ func DeleteNodeAndResetPods(ctx context.Context, a scalesim.VirtualClusterAccess
 	}
 	createdTime := time.Now()
 	time.Sleep(2 * time.Second)
-	err = a.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, podListForRun...)
+	err = a.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, "", podListForRun...)
 	if err != nil {
 		return nil, err
 	}
@@ -507,14 +507,15 @@ func IsExistingNode(n *corev1.Node) bool {
 }
 
 func DeleteNodeAndPods(ctx context.Context, w http.ResponseWriter, access scalesim.VirtualClusterAccess, node *corev1.Node, pods []corev1.Pod) error {
-	webutil.Log(w, fmt.Sprintf("Deleting Pods that were assigned to Node %s since it can be removed safely", node.Name))
-	err := access.DeletePods(ctx, pods...)
+	webutil.Log(w, fmt.Sprintf("Deleting Node %s", node.Name))
+	err := access.DeleteNode(ctx, node.Name)
 	if err != nil {
 		webutil.InternalError(w, err)
 		return err
 	}
-	webutil.Log(w, fmt.Sprintf("Deleting Node %s since it can be removed safely", node.Name))
-	err = access.DeleteNode(ctx, node.Name)
+
+	webutil.Log(w, fmt.Sprintf("Deleting Pods that were assigned to Node %s", node.Name))
+	err = access.DeletePods(ctx, pods...)
 	if err != nil {
 		webutil.InternalError(w, err)
 		return err

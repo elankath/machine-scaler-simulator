@@ -77,22 +77,17 @@ func (a *access) UpdateNodes(ctx context.Context, nodes ...corev1.Node) error {
 
 func (a *access) DeleteNode(ctx context.Context, name string) error {
 	node := corev1.Node{}
-	err := a.client.Get(ctx, types.NamespacedName{Name: name}, &node)
-	if err != nil {
+	if err := a.client.Get(ctx, types.NamespacedName{Name: name}, &node); client.IgnoreNotFound(err) != nil {
 		return err
 	}
-	err = a.client.Delete(ctx, &node)
-	if err != nil {
-		return err
-	}
-	return nil
+	return a.client.Delete(ctx, &node)
 }
 
 func (a *access) DeleteNodesWithMatchingLabels(ctx context.Context, labels map[string]string) error {
 	return a.client.DeleteAllOf(ctx, &corev1.Node{}, client.MatchingLabels(labels))
 }
 
-func (a *access) CreatePods(ctx context.Context, schedulerName string, pods ...corev1.Pod) error {
+func (a *access) CreatePods(ctx context.Context, schedulerName, nodeName string, pods ...corev1.Pod) error {
 	for _, pod := range pods {
 		var podObjMeta metav1.ObjectMeta
 		if pod.GenerateName != "" {
@@ -117,7 +112,7 @@ func (a *access) CreatePods(ctx context.Context, schedulerName string, pods ...c
 			Spec:       pod.Spec,
 		}
 		dupPod.Spec.SchedulerName = schedulerName
-		dupPod.Spec.NodeName = ""
+		dupPod.Spec.NodeName = nodeName
 		dupPod.Spec.TerminationGracePeriodSeconds = ptr.To(int64(0))
 		dupPod.Status = corev1.PodStatus{}
 		err := a.client.Create(ctx, &dupPod)
@@ -135,7 +130,7 @@ func (a *access) CreatePodsFromYaml(ctx context.Context, podYamlPath string, rep
 		return fmt.Errorf("cannot read pod spec %q: %w", podYamlPath, err)
 	}
 	for i := 0; i < replicas; i++ {
-		err = a.CreatePods(ctx, BinPackingSchedulerName, pod)
+		err = a.CreatePods(ctx, BinPackingSchedulerName, "", pod)
 		if err != nil {
 			return fmt.Errorf("cannot create replica %d of pod spec %q: %w", i, podYamlPath, err)
 		}

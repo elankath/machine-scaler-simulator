@@ -103,16 +103,16 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(unscheduledPods) != 0 {
-		err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), virtualcluster.BinPackingSchedulerName, unscheduledPods...)
+		err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), virtualcluster.BinPackingSchedulerName, "", unscheduledPods...)
 		if err != nil {
 			simutil.LogError(w, s.Name(), err)
 			return
 		}
 	}
 
-	timeoutSecs := 30 * time.Second
-	webutil.Logf(w, "Waiting till there are no unschedulable pods in virtual cluster or timeout of %.2f secs", timeoutSecs.Seconds())
-	_, err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeoutSecs, scaleStartTime)
+	timeout := 30 * time.Second
+	webutil.Logf(w, "Waiting till there are no unschedulable pods in virtual cluster or timeout of %.2f secs", timeout.Seconds())
+	_, err = simutil.WaitTillNoUnscheduledPodsOrTimeout(r.Context(), s.engine.VirtualClusterAccess(), timeout, scaleStartTime)
 	if err != nil { // TODO: too much repetition move this to scenarios as utility function
 		simutil.LogError(w, s.Name(), err)
 		return
