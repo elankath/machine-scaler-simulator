@@ -60,7 +60,7 @@ func ScaleDownOrderedByDescendingCost(ctx context.Context, vca scalesim.VirtualC
 		adjustedPodNames := simutil.PodNames(adjustedPods)
 		webutil.Log(w, fmt.Sprintf("Deploying adjusted Pods...: %s", adjustedPodNames))
 		deployStartTime := time.Now()
-		if err = vca.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, "", adjustedPods...); err != nil {
+		if err = vca.CreatePodsWithNodeAndScheduler(ctx, virtualcluster.BinPackingSchedulerName, "", adjustedPods...); err != nil {
 			return deletableNodeNames, err
 		}
 		scheduledPodNames, unscheduledPodNames, err := simutil.WaitForAndRecordPodSchedulingEvents(ctx, vca, w, deployStartTime, adjustedPods, 10*time.Second)
@@ -95,7 +95,7 @@ func recreateNodeWithPods(ctx context.Context, vca scalesim.VirtualClusterAccess
 	}
 	for _, pod := range pods {
 		schedName := pod.Spec.SchedulerName
-		if err := vca.CreatePods(ctx, schedName, node.Name, pod); err != nil {
+		if err := vca.CreatePodsWithNodeAndScheduler(ctx, schedName, node.Name, pod); err != nil {
 			return err
 		}
 	}

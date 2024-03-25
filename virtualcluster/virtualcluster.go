@@ -87,7 +87,23 @@ func (a *access) DeleteNodesWithMatchingLabels(ctx context.Context, labels map[s
 	return a.client.DeleteAllOf(ctx, &corev1.Node{}, client.MatchingLabels(labels))
 }
 
-func (a *access) CreatePods(ctx context.Context, schedulerName, nodeName string, pods ...corev1.Pod) error {
+func (a *access) CreatePods(ctx context.Context, pods ...corev1.Pod) error {
+	for _, pod := range pods {
+		clone := pod.DeepCopy()
+		clone.ObjectMeta.UID = ""
+		clone.ObjectMeta.ResourceVersion = ""
+		clone.ObjectMeta.CreationTimestamp = metav1.Time{}
+		clone.Spec.NodeName = ""
+		err := a.client.Create(ctx, clone)
+		if err != nil {
+			slog.Error("Error creating the pod.", "error", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *access) CreatePodsWithNodeAndScheduler(ctx context.Context, schedulerName, nodeName string, pods ...corev1.Pod) error {
 	for _, pod := range pods {
 		var podObjMeta metav1.ObjectMeta
 		if pod.GenerateName != "" {
@@ -130,7 +146,7 @@ func (a *access) CreatePodsFromYaml(ctx context.Context, podYamlPath string, rep
 		return fmt.Errorf("cannot read pod spec %q: %w", podYamlPath, err)
 	}
 	for i := 0; i < replicas; i++ {
-		err = a.CreatePods(ctx, BinPackingSchedulerName, "", pod)
+		err = a.CreatePodsWithNodeAndScheduler(ctx, BinPackingSchedulerName, "", pod)
 		if err != nil {
 			return fmt.Errorf("cannot create replica %d of pod spec %q: %w", i, podYamlPath, err)
 		}

@@ -3,6 +3,7 @@ package simutil
 import (
 	"cmp"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/elankath/scaler-simulator/pricing"
 	"github.com/samber/lo"
+	"golang.org/x/exp/rand"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/elankath/scaler-simulator/virtualcluster"
 	"github.com/elankath/scaler-simulator/webutil"
@@ -98,15 +101,15 @@ func PrintScheduledPodEvents(ctx context.Context, a scalesim.VirtualClusterAcces
 	return nil
 }
 
-func WaitForAndRecordPodSchedulingEvents(ctx context.Context, vca scalesim.VirtualClusterAccess, w http.ResponseWriter, since time.Time, pods []corev1.Pod, timeout time.Duration) (scheduledPodNames []string, unscheduledPodNames []string, err error) {
+func WaitForAndRecordPodSchedulingEvents(ctx context.Context, vca scalesim.VirtualClusterAccess, w http.ResponseWriter, since time.Time, pods []corev1.Pod, timeout time.Duration) (scheduledPodNames sets.Set[string], unscheduledPodNames sets.Set[string], err error) {
 	tick := time.NewTicker(timeout)
 	defer tick.Stop()
 	pollTick := time.NewTicker(100 * time.Millisecond)
 	defer pollTick.Stop()
 
 	podNames := PodNames(pods)
-	scheduledPodNames = make([]string, 0, len(pods))
-	unscheduledPodNames = make([]string, 0, len(pods))
+	scheduledPodNames = sets.New[string]()
+	unscheduledPodNames = sets.New[string]()
 
 loop:
 	for {
@@ -114,7 +117,7 @@ loop:
 		case <-ctx.Done():
 			return scheduledPodNames, unscheduledPodNames, fmt.Errorf("context cancelled, timeout waiting for pod events: %w", ctx.Err())
 		case <-tick.C:
-			return scheduledPodNames, unscheduledPodNames, nil
+			return scheduledPodNames, unscheduledPodNames, fmt.Errorf("timeout waiting for pod events")
 		case <-pollTick.C:
 			events, err := GetPodSchedulingEvents(ctx, vca, podNames, since)
 			if err != nil {
@@ -125,26 +128,30 @@ loop:
 				switch event.Reason {
 				case "FailedScheduling":
 					webutil.Log(w, fmt.Sprintf("Pod %s failed scheduling at %s", event.InvolvedObject.Name, event.EventTime.Time.String()))
-					unscheduledPodNames = append(unscheduledPodNames, event.InvolvedObject.Name)
+					unscheduledPodNames.Insert(event.InvolvedObject.Name)
 				case "Scheduled":
 					webutil.Log(w, fmt.Sprintf("Pod %s scheduled at %s", event.InvolvedObject.Name, event.EventTime.Time.String()))
-					scheduledPodNames = append(scheduledPodNames, event.InvolvedObject.Name)
+					scheduledPodNames.Insert(event.InvolvedObject.Name)
 					podNames = slices.DeleteFunc(podNames, func(podName string) bool {
 						return podName == event.InvolvedObject.Name
 					})
-					unscheduledPodNames = slices.DeleteFunc(unscheduledPodNames, func(podName string) bool {
-						return podName == event.InvolvedObject.Name
-					})
+					unscheduledPodNames.Delete(event.InvolvedObject.Name)
 				}
 			}
 			webutil.Log(w, fmt.Sprintf("Scheduled Pods: %d, Unscheduled Pods: %d, Total Pods : %d", len(scheduledPodNames), len(unscheduledPodNames), len(pods)))
 			if len(scheduledPodNames)+len(unscheduledPodNames) == len(pods) {
 				break loop
 			}
-			since = time.Now()
+			//since = time.Now()
 		}
-
 	}
+
+	/*
+		Run #1
+			1 pod got scheduled and 11 did not. There are 11 unscheduled events.
+		Run #2
+
+	*/
 	return scheduledPodNames, unscheduledPodNames, nil
 }
 
@@ -455,7 +462,7 @@ func ApplyDsPodsToNodes(ctx context.Context, v scalesim.VirtualClusterAccess, ds
 			deployablePods = append(deployablePods, p)
 		}
 		slog.Info("Creating DS pods for node", "node", node.Name, "numPods", len(deployablePods))
-		err = v.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, "", deployablePods...)
+		err = v.CreatePodsWithNodeAndScheduler(ctx, virtualcluster.BinPackingSchedulerName, "", deployablePods...)
 		if err != nil {
 			return err
 		}
@@ -491,7 +498,7 @@ func DeleteNodeAndResetPods(ctx context.Context, a scalesim.VirtualClusterAccess
 	//time.Sleep(2 * time.Second)
 	adjustedPods := AdjustPods(podListForRun)
 	deployTime := time.Now()
-	err = a.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, "", adjustedPods...)
+	err = a.CreatePodsWithNodeAndScheduler(ctx, virtualcluster.BinPackingSchedulerName, "", adjustedPods...)
 	if err != nil {
 		return nil, time.Time{}, err
 	}
@@ -592,4 +599,19 @@ func DeleteNodeAndPods(ctx context.Context, w http.ResponseWriter, access scales
 		return err
 	}
 	return nil
+}
+
+func EmptyOr(val string, defaultVal string) string {
+	if val == "" {
+		return defaultVal
+	}
+	return val
+}
+
+func GenerateRandomString(length int) (string, error) {
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }

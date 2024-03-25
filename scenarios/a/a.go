@@ -103,7 +103,7 @@ func (s *scenarioA) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(unscheduledPods) != 0 {
-		err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), virtualcluster.BinPackingSchedulerName, "", unscheduledPods...)
+		err = s.engine.VirtualClusterAccess().CreatePodsWithNodeAndScheduler(r.Context(), virtualcluster.BinPackingSchedulerName, "", unscheduledPods...)
 		if err != nil {
 			simutil.LogError(w, s.Name(), err)
 			return

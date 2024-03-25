@@ -48,7 +48,9 @@ type VirtualClusterAccess interface {
 	AddTaintToNode(context.Context, *corev1.Node) error
 
 	// CreatePods creates the given slice of k8s Pods in the virtual cluster
-	CreatePods(context.Context, string, string, ...corev1.Pod) error
+	CreatePods(context.Context, ...corev1.Pod) error
+
+	CreatePodsWithNodeAndScheduler(context.Context, string, string, ...corev1.Pod) error
 
 	// CreatePodsFromYaml loads the pod yaml at the given podYamlPath and creates Pods for given number of replicas.
 	CreatePodsFromYaml(ctx context.Context, podYamlPath string, replicas int) error

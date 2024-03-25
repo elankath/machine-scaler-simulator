@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"math"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/elankath/scaler-simulator/virtualcluster"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/webutil"
@@ -269,7 +271,7 @@ func (r *Recommender) setupNodePoolSimRun(ctx context.Context, labelKey, labelVa
 		}
 		podList = append(podList, *podCopy)
 	}
-	return r.engine.VirtualClusterAccess().CreatePods(ctx, "bin-packing", "", podList...)
+	return r.engine.VirtualClusterAccess().CreatePodsWithNodeAndScheduler(ctx, virtualcluster.BinPackingSchedulerName, "", podList...)
 }
 
 func (r *Recommender) resetNodePoolSimRun(ctx context.Context, labelKey, labelValue string) error {

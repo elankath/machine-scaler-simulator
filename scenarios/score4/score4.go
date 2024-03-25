@@ -2,11 +2,14 @@ package score4
 
 import (
 	"fmt"
+	"net/http"
+
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/nodescorer"
+	"github.com/elankath/scaler-simulator/simutil"
+	"github.com/elankath/scaler-simulator/virtualcluster"
 	"github.com/elankath/scaler-simulator/webutil"
-	"net/http"
-	"time"
+	corev1 "k8s.io/api/core/v1"
 )
 
 var shootName = "scenario-c1"
@@ -43,33 +46,29 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	smallCount := webutil.GetIntQueryParam(r, "small", 10)
 	largeCount := webutil.GetIntQueryParam(r, "large", 2)
 
-	deployTime := time.Now()
-	podSpecPath := "scenarios/score4/podLarge.yaml"
-	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, largeCount))
-	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, largeCount)
+	smallPods, err := constructPods("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount)
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
 	}
-
-	podSpecPath = "scenarios/score4/podSmall.yaml"
+	largePods, err := constructPods("large", virtualcluster.BinPackingSchedulerName, "", "12Gi", "200m", largeCount)
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
 	}
-	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, smallCount))
-	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, smallCount)
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
+	allPods := make([]corev1.Pod, 0, smallCount+largeCount)
+	allPods = append(smallPods, largePods...)
+	//if err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), allPods...); err != nil {
+	//	webutil.InternalError(w, err)
+	//	return
+	//}
 
 	recommender := nodescorer.NewRecommender(s.engine, scenarioName, shootName, nodescorer.StrategyWeights{
 		LeastWaste: 1.0,
 		LeastCost:  1.5,
 	}, w)
 
-	recommendation, err := recommender.Run(r.Context(), deployTime)
+	recommendation, err := recommender.Run(r.Context(), allPods)
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		return
@@ -90,4 +89,27 @@ func (s scenarioscore4) ShootName() string {
 
 func (s scenarioscore4) Name() string {
 	return scenarioName
+}
+
+func constructPods(namePrefix string, schedulerName string, nodeName string, memRequest, cpuRequest string, count int) ([]corev1.Pod, error) {
+	pods := make([]corev1.Pod, 0, count)
+	for i := 0; i < count; i++ {
+		suffix, err := simutil.GenerateRandomString(4)
+		if err != nil {
+			return nil, err
+		}
+		p, err := simutil.NewPodBuilder().
+			Name(namePrefix+"-"+suffix).
+			SchedulerName(schedulerName).
+			AddLabel("app.kubernetes.io/name", "score4").
+			NodeName(nodeName).
+			RequestMemory(memRequest).
+			RequestCPU(cpuRequest).
+			Build()
+		if err != nil {
+			return nil, err
+		}
+		pods = append(pods, *p)
+	}
+	return pods, nil
 }

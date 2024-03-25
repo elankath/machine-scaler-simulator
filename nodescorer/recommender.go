@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
@@ -38,29 +37,30 @@ func NewRecommender(engine scalesim.Engine, scenarioName, shootName string, stra
 	}
 }
 
-func (r *Recommender) Run(ctx context.Context, deployTime time.Time) (map[string]int, error) {
+func (r *Recommender) Run(ctx context.Context, unscheduledPods []corev1.Pod) (map[string]int, error) {
+	startTime := time.Now()
+	defer func() {
+		webutil.Logf(r.logWriter, "Execution of scenario: %s completed in %v", r.scenarioName, time.Since(startTime))
+	}()
 	recommendation := make(map[string]int)
-	unscheduledPods, err := r.engine.VirtualClusterAccess().ListPods(ctx)
+	var runCounter int
+	shoot, err := r.engine.ShootAccess(r.shootName).GetShootObj()
 	if err != nil {
-		r.logError(err)
+		webutil.InternalError(r.logWriter, err)
 		return recommendation, err
 	}
-	var runCounter int
 	for {
-		var nodeScores scalesim.NodeRunResults
 		runCounter++
-		unscheduledPodCount, err := simutil.GetUnscheduledPodCount(ctx, r.engine.VirtualClusterAccess())
-		if err != nil {
-			r.logError(err)
-			return recommendation, err
-		}
+		var nodeScores scalesim.NodeRunResults
+		unscheduledPodCount := len(unscheduledPods)
+
 		if unscheduledPodCount == 0 {
 			webutil.Log(r.logWriter, "All pods are scheduled. Exiting the loop...")
 			break
 		}
 		webutil.Log(r.logWriter, fmt.Sprintf("Scenario-Run #%d", runCounter))
 
-		nodeScores, unscheduledPods = r.computeNodeScores(ctx, unscheduledPods)
+		nodeScores = r.computeNodeScores(ctx, shoot, unscheduledPods)
 		if len(nodeScores) == 0 {
 			webutil.Log(r.logWriter, fmt.Sprintf("In Scenario-Run #%d, no pods could be assgined, exiting early", runCounter))
 			break
@@ -69,12 +69,18 @@ func (r *Recommender) Run(ctx context.Context, deployTime time.Time) (map[string
 		webutil.Log(r.logWriter, "Winning Score: "+winnerNodeScore.String())
 		recommendation[winnerNodeScore.Pool.Name]++
 
+		checkEventsSince := time.Now()
 		scaledNode, err := r.scaleWorker(ctx, winnerNodeScore.Pool)
 		if err != nil {
 			r.logError(err)
 			return recommendation, err
 		}
-		_, _, err = simutil.WaitForAndRecordPodSchedulingEvents(ctx, r.engine.VirtualClusterAccess(), r.logWriter, deployTime, unscheduledPods, 10*time.Second)
+		if err = r.engine.VirtualClusterAccess().CreatePods(ctx, unscheduledPods...); err != nil {
+			r.logError(err)
+			return recommendation, err
+		}
+
+		_, _, err = simutil.WaitForAndRecordPodSchedulingEvents(ctx, r.engine.VirtualClusterAccess(), r.logWriter, checkEventsSince, unscheduledPods, 10*time.Second)
 		if err != nil {
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
 			return recommendation, err
@@ -85,14 +91,18 @@ func (r *Recommender) Run(ctx context.Context, deployTime time.Time) (map[string
 			r.logError(err)
 			return recommendation, err
 		}
+		webutil.Log(r.logWriter, fmt.Sprintf("At the end of run #%d, winner node %s is assigned pods: %v", runCounter, scaledNode.Name, simutil.PodNames(assignedPods)))
 		if len(assignedPods) == 0 {
 			webutil.Log(r.logWriter, "No pods are assigned to the winning scaled node "+scaledNode.Name)
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error")
 			return recommendation, err
 		}
 		unscheduledPods = simutil.DeleteAssignedPods(unscheduledPods, assignedPods)
-
-		webutil.Log(r.logWriter, "Num of remaining unscheduled pods: "+strconv.Itoa(len(unscheduledPods)))
+		webutil.Log(r.logWriter, fmt.Sprintf("Removing unscheduled pods #%d, at the end of run #%d", len(unscheduledPods), runCounter))
+		if err = r.engine.VirtualClusterAccess().DeletePods(ctx, unscheduledPods...); err != nil {
+			r.logError(err)
+			return recommendation, err
+		}
 	}
 	return recommendation, nil
 }
@@ -106,50 +116,48 @@ func (r *Recommender) scaleWorker(ctx context.Context, worker *v1beta1.Worker) (
 	return scaledNode, err
 }
 
-func (r *Recommender) computeNodeScores(ctx context.Context, candidatePods []corev1.Pod) (scalesim.NodeRunResults, []corev1.Pod) {
+func (r *Recommender) computeNodeScores(ctx context.Context, shoot *v1beta1.Shoot, candidatePods []corev1.Pod) scalesim.NodeRunResults {
 	nodeScores := scalesim.NodeRunResults(make(map[string]scalesim.NodeRunResult))
-	shoot, err := r.engine.ShootAccess(r.shootName).GetShootObj()
-	if err != nil {
-		webutil.InternalError(r.logWriter, err)
-		return nil, candidatePods
-	}
-
-	checkEventsSince := time.Now()
-
+	var checkEventsSince time.Time
 	for _, pool := range shoot.Spec.Provider.Workers {
-
+		//if err = r.engine.VirtualClusterAccess().DeletePods(ctx, candidatePods...); err != nil {
+		//	webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
+		//	return nil, candidatePods
+		//}
 		webutil.Logf(r.logWriter, "Scaling workerpool %s...", pool.Name)
+		checkEventsSince = time.Now()
 		scaledNode, err := simutil.CreateNodeInWorkerGroup(ctx, r.engine.VirtualClusterAccess(), &pool)
 		if err != nil {
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
-			return nil, candidatePods
+			return nil
 		}
 		if scaledNode == nil {
 			webutil.Log(r.logWriter, "No new node can be created for pool "+pool.Name+" as it has reached its max. Skipping this pool.")
 			continue
 		}
+		if err = r.engine.VirtualClusterAccess().CreatePods(ctx, candidatePods...); err != nil {
+			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
+			return nil
+		}
 		_, _, err = simutil.WaitForAndRecordPodSchedulingEvents(ctx, r.engine.VirtualClusterAccess(), r.logWriter, checkEventsSince, candidatePods, 10*time.Second)
 		if err != nil {
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
-			return nil, candidatePods
+			return nil
 		}
 		allPods, err := r.engine.VirtualClusterAccess().ListPods(ctx)
 		if err != nil {
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
-			return nil, candidatePods
+			return nil
 		}
-
 		candidatePods = simutil.GetMatchingPods(allPods, candidatePods)
 		nodeScore, err := computeNodeRunResult(r.strategyWeights, scaledNode, candidatePods, shoot.Spec.Provider.Workers)
 		if err != nil {
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
-			return nil, candidatePods
+			return nil
 		}
-		webutil.Log(r.logWriter, "Deleting scaled node and clearing pod assignments...")
-		candidatePods, checkEventsSince, err = simutil.DeleteNodeAndResetPods(ctx, r.engine.VirtualClusterAccess(), scaledNode.Name, candidatePods)
-		if err != nil {
-			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
-			return nil, candidatePods
+		webutil.Log(r.logWriter, "Resetting virtual cluster state for next scale-up...")
+		if err = r.resetRunState(ctx, scaledNode.Name, candidatePods); err != nil {
+			return nil
 		}
 		if nodeScore.NumAssignedPodsToNode == 0 {
 			webutil.Log(r.logWriter, "No pods are scheduled on the candidate scaled node "+scaledNode.Name+". This node group will not be considered in this run")
@@ -158,9 +166,22 @@ func (r *Recommender) computeNodeScores(ctx context.Context, candidatePods []cor
 		nodeScores[scaledNode.Name] = nodeScore
 		webutil.Log(r.logWriter, fmt.Sprintf("Node score for %s: %v", scaledNode.Name, nodeScores[scaledNode.Name]))
 	}
-	return nodeScores, candidatePods
+	return nodeScores
 }
 
 func (r *Recommender) logError(err error) {
 	webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
+}
+
+func (r *Recommender) resetRunState(ctx context.Context, nodeName string, pods []corev1.Pod) error {
+	webutil.Log(r.logWriter, "Deleting scaled node..."+nodeName)
+	if err := r.engine.VirtualClusterAccess().DeleteNode(ctx, nodeName); err != nil {
+		webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
+		return err
+	}
+	if err := r.engine.VirtualClusterAccess().DeletePods(ctx, pods...); err != nil {
+		webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
+		return err
+	}
+	return nil
 }
