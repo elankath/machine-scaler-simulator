@@ -6,9 +6,10 @@ import (
 	"github.com/elankath/scaler-simulator/nodescorer"
 	"github.com/elankath/scaler-simulator/webutil"
 	"net/http"
+	"time"
 )
 
-var shootName = "scenario-c2"
+var shootName = "scenario-c1"
 var scenarioName = "score4"
 
 type scenarioscore4 struct {
@@ -42,6 +43,7 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	smallCount := webutil.GetIntQueryParam(r, "small", 10)
 	largeCount := webutil.GetIntQueryParam(r, "large", 2)
 
+	deployTime := time.Now()
 	podSpecPath := "scenarios/score4/podLarge.yaml"
 	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, largeCount))
 	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, largeCount)
@@ -67,7 +69,7 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		LeastCost:  1.5,
 	}, w)
 
-	recommendation, err := recommender.Run(r.Context())
+	recommendation, err := recommender.Run(r.Context(), deployTime)
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		return
@@ -89,4 +91,3 @@ func (s scenarioscore4) ShootName() string {
 func (s scenarioscore4) Name() string {
 	return scenarioName
 }
-

@@ -38,7 +38,7 @@ func NewRecommender(engine scalesim.Engine, scenarioName, shootName string, stra
 	}
 }
 
-func (r *Recommender) Run(ctx context.Context) (map[string]int, error) {
+func (r *Recommender) Run(ctx context.Context, deployTime time.Time) (map[string]int, error) {
 	recommendation := make(map[string]int)
 	unscheduledPods, err := r.engine.VirtualClusterAccess().ListPods(ctx)
 	if err != nil {
@@ -74,8 +74,11 @@ func (r *Recommender) Run(ctx context.Context) (map[string]int, error) {
 			r.logError(err)
 			return recommendation, err
 		}
-		webutil.Log(r.logWriter, "Waiting for 5 seconds for pod assignments to winning scalednode: "+scaledNode.Name)
-		time.Sleep(5 * time.Second) //FIXME: remove sleeps and parallelize.
+		_, _, err = simutil.WaitForAndRecordPodSchedulingEvents(ctx, r.engine.VirtualClusterAccess(), r.logWriter, deployTime, unscheduledPods, 10*time.Second)
+		if err != nil {
+			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
+			return recommendation, err
+		}
 
 		assignedPods, err := simutil.GetPodsAssignedToNode(ctx, r.engine.VirtualClusterAccess(), scaledNode.Name)
 		if err != nil {
@@ -111,7 +114,10 @@ func (r *Recommender) computeNodeScores(ctx context.Context, candidatePods []cor
 		return nil, candidatePods
 	}
 
+	checkEventsSince := time.Now()
+
 	for _, pool := range shoot.Spec.Provider.Workers {
+
 		webutil.Logf(r.logWriter, "Scaling workerpool %s...", pool.Name)
 		scaledNode, err := simutil.CreateNodeInWorkerGroup(ctx, r.engine.VirtualClusterAccess(), &pool)
 		if err != nil {
@@ -122,8 +128,11 @@ func (r *Recommender) computeNodeScores(ctx context.Context, candidatePods []cor
 			webutil.Log(r.logWriter, "No new node can be created for pool "+pool.Name+" as it has reached its max. Skipping this pool.")
 			continue
 		}
-		webutil.Log(r.logWriter, "Waiting for 5 seconds before calculating node score...")
-		time.Sleep(5 * time.Second)
+		_, _, err = simutil.WaitForAndRecordPodSchedulingEvents(ctx, r.engine.VirtualClusterAccess(), r.logWriter, checkEventsSince, candidatePods, 10*time.Second)
+		if err != nil {
+			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
+			return nil, candidatePods
+		}
 		allPods, err := r.engine.VirtualClusterAccess().ListPods(ctx)
 		if err != nil {
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
@@ -137,7 +146,7 @@ func (r *Recommender) computeNodeScores(ctx context.Context, candidatePods []cor
 			return nil, candidatePods
 		}
 		webutil.Log(r.logWriter, "Deleting scaled node and clearing pod assignments...")
-		candidatePods, err = simutil.DeleteNodeAndResetPods(ctx, r.engine.VirtualClusterAccess(), scaledNode.Name, candidatePods)
+		candidatePods, checkEventsSince, err = simutil.DeleteNodeAndResetPods(ctx, r.engine.VirtualClusterAccess(), scaledNode.Name, candidatePods)
 		if err != nil {
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
 			return nil, candidatePods

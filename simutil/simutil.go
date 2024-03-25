@@ -114,19 +114,20 @@ loop:
 		case <-ctx.Done():
 			return scheduledPodNames, unscheduledPodNames, fmt.Errorf("context cancelled, timeout waiting for pod events: %w", ctx.Err())
 		case <-tick.C:
-			return scheduledPodNames, unscheduledPodNames, fmt.Errorf("timedout waiting for pod events")
+			return scheduledPodNames, unscheduledPodNames, nil
 		case <-pollTick.C:
 			events, err := GetPodSchedulingEvents(ctx, vca, podNames, since)
 			if err != nil {
 				slog.Error("cannot get pod scheduling events, this will be retried", "error", err)
 			}
+			webutil.Log(w, fmt.Sprintf("Received %d events", len(events)))
 			for _, event := range events {
 				switch event.Reason {
 				case "FailedScheduling":
-					webutil.Logf(w, "Pod %s failed scheduling at %s", event.InvolvedObject.Name, event.EventTime.Time.String())
+					webutil.Log(w, fmt.Sprintf("Pod %s failed scheduling at %s", event.InvolvedObject.Name, event.EventTime.Time.String()))
 					unscheduledPodNames = append(unscheduledPodNames, event.InvolvedObject.Name)
 				case "Scheduled":
-					webutil.Logf(w, "Pod %s scheduled at %s", event.InvolvedObject.Name, event.EventTime.Time.String())
+					webutil.Log(w, fmt.Sprintf("Pod %s scheduled at %s", event.InvolvedObject.Name, event.EventTime.Time.String()))
 					scheduledPodNames = append(scheduledPodNames, event.InvolvedObject.Name)
 					podNames = slices.DeleteFunc(podNames, func(podName string) bool {
 						return podName == event.InvolvedObject.Name
@@ -136,10 +137,13 @@ loop:
 					})
 				}
 			}
+			webutil.Log(w, fmt.Sprintf("Scheduled Pods: %d, Unscheduled Pods: %d, Total Pods : %d", len(scheduledPodNames), len(unscheduledPodNames), len(pods)))
 			if len(scheduledPodNames)+len(unscheduledPodNames) == len(pods) {
 				break loop
 			}
+			since = time.Now()
 		}
+
 	}
 	return scheduledPodNames, unscheduledPodNames, nil
 }
@@ -474,32 +478,34 @@ func GetMatchingPods(allPods []corev1.Pod, filterPods []corev1.Pod) []corev1.Pod
 	return matchingPods
 }
 
-func DeleteNodeAndResetPods(ctx context.Context, a scalesim.VirtualClusterAccess, nodeName string, podListForRun []corev1.Pod) ([]corev1.Pod, error) {
+func DeleteNodeAndResetPods(ctx context.Context, a scalesim.VirtualClusterAccess, nodeName string, podListForRun []corev1.Pod) ([]corev1.Pod, time.Time, error) {
 	err := a.DeleteNode(ctx, nodeName)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
 	err = a.DeletePods(ctx, podListForRun...)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
-	createdTime := time.Now()
-	time.Sleep(2 * time.Second)
-	err = a.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, "", podListForRun...)
+	//createdTime := time.Now()
+	//time.Sleep(2 * time.Second)
+	adjustedPods := AdjustPods(podListForRun)
+	deployTime := time.Now()
+	err = a.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, "", adjustedPods...)
 	if err != nil {
-		return nil, err
+		return nil, time.Time{}, err
 	}
-	allPods, err := a.ListPods(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var newPods []corev1.Pod
-	for _, pod := range allPods {
-		if pod.CreationTimestamp.After(createdTime) {
-			newPods = append(newPods, pod)
-		}
-	}
-	return newPods, nil
+	//allPods, err := a.ListPods(ctx)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//var newPods []corev1.Pod
+	//for _, pod := range allPods {
+	//	if pod.CreationTimestamp.After(createdTime) {
+	//		newPods = append(newPods, pod)
+	//	}
+	//}
+	return adjustedPods, deployTime, nil
 }
 
 func GetPodsAssignedToNode(ctx context.Context, a scalesim.VirtualClusterAccess, nodeName string) ([]corev1.Pod, error) {
