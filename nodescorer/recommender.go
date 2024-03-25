@@ -37,18 +37,14 @@ func NewRecommender(engine scalesim.Engine, scenarioName, shootName string, stra
 	}
 }
 
-func (r *Recommender) Run(ctx context.Context, unscheduledPods []corev1.Pod) (map[string]int, error) {
+func (r *Recommender) Run(ctx context.Context, shoot *v1beta1.Shoot, unscheduledPods []corev1.Pod) (map[string]int, error) {
 	startTime := time.Now()
 	defer func() {
 		webutil.Logf(r.logWriter, "Execution of scenario: %s completed in %v", r.scenarioName, time.Since(startTime))
 	}()
 	recommendation := make(map[string]int)
 	var runCounter int
-	shoot, err := r.engine.ShootAccess(r.shootName).GetShootObj()
-	if err != nil {
-		webutil.InternalError(r.logWriter, err)
-		return recommendation, err
-	}
+
 	for {
 		runCounter++
 		var nodeScores scalesim.NodeRunResults

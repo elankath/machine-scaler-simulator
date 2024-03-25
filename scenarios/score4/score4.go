@@ -58,17 +58,18 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	allPods := make([]corev1.Pod, 0, smallCount+largeCount)
 	allPods = append(smallPods, largePods...)
-	//if err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), allPods...); err != nil {
-	//	webutil.InternalError(w, err)
-	//	return
-	//}
 
 	recommender := nodescorer.NewRecommender(s.engine, scenarioName, shootName, nodescorer.StrategyWeights{
 		LeastWaste: 1.0,
 		LeastCost:  1.5,
 	}, w)
 
-	recommendation, err := recommender.Run(r.Context(), allPods)
+	shoot, err := s.engine.ShootAccess(shootName).GetShootObj()
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+	recommendation, err := recommender.Run(r.Context(), shoot, allPods)
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		return
