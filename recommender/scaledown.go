@@ -28,6 +28,11 @@ import (
 //     Un-taint the node if this node is essential.
 //     }
 func ScaleDownOrderedByDescendingCost(ctx context.Context, vca scalesim.VirtualClusterAccess, w http.ResponseWriter, nodes []corev1.Node) ([]string, error) {
+	startTime := time.Now()
+	defer func() {
+		executionDuration := time.Since(startTime)
+		webutil.Log(w, fmt.Sprintf("ScaleDownOrderedByDescendingCost scale down recommender took %f seconds", executionDuration.Seconds()))
+	}()
 	slices.SortFunc(nodes, simutil.ComparePriceDescending)
 	var deletableNodeNames []string
 
@@ -58,18 +63,13 @@ func ScaleDownOrderedByDescendingCost(ctx context.Context, vca scalesim.VirtualC
 		if err = vca.CreatePods(ctx, virtualcluster.BinPackingSchedulerName, "", adjustedPods...); err != nil {
 			return deletableNodeNames, err
 		}
-
-		numUnscheduled, err := simutil.WaitAndGetUnscheduledPodCount(ctx, vca, 10)
-		webutil.Log(w, fmt.Sprintf("candidate node: %s, numUnscheduledPods: %d, after deployment of adjusted pods: %s, error (if any):  %v", n.Name, numUnscheduled, adjustedPodNames, err))
+		scheduledPodNames, unscheduledPodNames, err := simutil.WaitForAndRecordPodSchedulingEvents(ctx, vca, w, deployStartTime, adjustedPods, 10*time.Second)
 		if err != nil {
 			return deletableNodeNames, err
 		} else {
-			err = simutil.PrintScheduledPodEvents(ctx, vca, deployStartTime, w)
-			if err != nil {
-				webutil.Log(w, "Error while printing scheduled pod events")
-			}
-			if numUnscheduled != 0 {
-				webutil.Log(w, fmt.Sprintf("Node %s CANNOT be removed since it will result in %d unscheduled pods", n.Name, numUnscheduled))
+			webutil.Log(w, fmt.Sprintf("Scheduled pods: %v, unscheduled pods: %v", scheduledPodNames, unscheduledPodNames))
+			if len(unscheduledPodNames) != 0 {
+				webutil.Log(w, fmt.Sprintf("Node %s CANNOT be removed since it will result in %d unscheduled pods", n.Name, len(unscheduledPodNames)))
 				if err = vca.DeletePods(ctx, adjustedPods...); err != nil {
 					return deletableNodeNames, err
 				}

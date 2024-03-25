@@ -5,12 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/elankath/scaler-simulator/pricing"
-	"github.com/samber/lo"
 	"log/slog"
 	"net/http"
 	"slices"
 	"time"
+
+	"github.com/elankath/scaler-simulator/pricing"
+	"github.com/samber/lo"
 
 	"github.com/elankath/scaler-simulator/virtualcluster"
 	"github.com/elankath/scaler-simulator/webutil"
@@ -54,6 +55,24 @@ func GetFailedSchedulingEvents(ctx context.Context, a scalesim.VirtualClusterAcc
 	return failedSchedulingEvents, nil
 }
 
+func GetPodSchedulingEvents(ctx context.Context, vca scalesim.VirtualClusterAccess, podNames []string, since time.Time) ([]corev1.Event, error) {
+	var podEvents []corev1.Event
+	events, err := vca.ListEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, event := range events {
+		sinceTime := metav1.NewTime(since)
+		if event.EventTime.BeforeTime(&sinceTime) {
+			continue
+		}
+		if slices.Contains(podNames, event.InvolvedObject.Name) {
+			podEvents = append(podEvents, event)
+		}
+	}
+	return podEvents, nil
+}
+
 func PrintScheduledPodEvents(ctx context.Context, a scalesim.VirtualClusterAccess, since time.Time, w http.ResponseWriter) error {
 	events, err := a.ListEvents(ctx)
 	if err != nil {
@@ -77,6 +96,52 @@ func PrintScheduledPodEvents(ctx context.Context, a scalesim.VirtualClusterAcces
 		}
 	}
 	return nil
+}
+
+func WaitForAndRecordPodSchedulingEvents(ctx context.Context, vca scalesim.VirtualClusterAccess, w http.ResponseWriter, since time.Time, pods []corev1.Pod, timeout time.Duration) (scheduledPodNames []string, unscheduledPodNames []string, err error) {
+	tick := time.NewTicker(timeout)
+	defer tick.Stop()
+	pollTick := time.NewTicker(100 * time.Millisecond)
+	defer pollTick.Stop()
+
+	podNames := PodNames(pods)
+	scheduledPodNames = make([]string, 0, len(pods))
+	unscheduledPodNames = make([]string, 0, len(pods))
+
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			return scheduledPodNames, unscheduledPodNames, fmt.Errorf("context cancelled, timeout waiting for pod events: %w", ctx.Err())
+		case <-tick.C:
+			return scheduledPodNames, unscheduledPodNames, fmt.Errorf("timedout waiting for pod events")
+		case <-pollTick.C:
+			events, err := GetPodSchedulingEvents(ctx, vca, podNames, since)
+			if err != nil {
+				slog.Error("cannot get pod scheduling events, this will be retried", "error", err)
+			}
+			for _, event := range events {
+				switch event.Reason {
+				case "FailedScheduling":
+					webutil.Logf(w, "Pod %s failed scheduling at %s", event.InvolvedObject.Name, event.EventTime.Time.String())
+					unscheduledPodNames = append(unscheduledPodNames, event.InvolvedObject.Name)
+				case "Scheduled":
+					webutil.Logf(w, "Pod %s scheduled at %s", event.InvolvedObject.Name, event.EventTime.Time.String())
+					scheduledPodNames = append(scheduledPodNames, event.InvolvedObject.Name)
+					podNames = slices.DeleteFunc(podNames, func(podName string) bool {
+						return podName == event.InvolvedObject.Name
+					})
+					unscheduledPodNames = slices.DeleteFunc(unscheduledPodNames, func(podName string) bool {
+						return podName == event.InvolvedObject.Name
+					})
+				}
+			}
+			if len(scheduledPodNames)+len(unscheduledPodNames) == len(pods) {
+				break loop
+			}
+		}
+	}
+	return scheduledPodNames, unscheduledPodNames, nil
 }
 
 func WaitTillNoUnscheduledPodsOrTimeout(ctx context.Context, access scalesim.VirtualClusterAccess, timeout time.Duration, since time.Time) (int, error) {

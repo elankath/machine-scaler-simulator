@@ -60,13 +60,13 @@ func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter) {
 		webutil.InternalError(w, err)
 		return
 	}
-	scaleDownRecommentation, err := recommender.ScaleDownOrderedByDescendingCost(ctx, s.engine.VirtualClusterAccess(), w, nodes)
+	scaleDownRecommendation, err := recommender.ScaleDownOrderedByDescendingCost(ctx, s.engine.VirtualClusterAccess(), w, nodes)
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.scenarioName+" completed with error: "+err.Error())
 		slog.Error("Execution of scenario: "+s.scenarioName+" ran into error", "error", err)
 		webutil.InternalError(w, err)
 	}
-	webutil.Log(w, fmt.Sprintf("Recommendation for Scale-Down: %s", scaleDownRecommentation))
+	webutil.Log(w, fmt.Sprintf("Recommendation for Scale-Down: %s", scaleDownRecommendation))
 	webutil.Log(w, "Scenario-End: "+s.scenarioName)
 }
 
