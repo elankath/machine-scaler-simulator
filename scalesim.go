@@ -4,6 +4,8 @@ package scalesim
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/resource"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -235,4 +237,48 @@ func (ns NodeRunResults) GetTotalAssignedPods() int {
 		total += v.NumAssignedPodsToNode
 	}
 	return total
+}
+
+type StrategyWeights struct {
+	LeastWaste float64
+	LeastCost  float64
+}
+
+type Recommendations map[string]*Recommendation
+
+type Recommender struct {
+	Engine          Engine
+	ScenarioName    string
+	ShootName       string
+	StrategyWeights StrategyWeights
+	LogWriter       http.ResponseWriter
+}
+
+type Recommendation struct {
+	WorkerPoolName string
+	Replicas       int
+	Cost           float64
+	Waste          resource.Quantity
+	Allocatable    resource.Quantity
+}
+
+func (r Recommendations) String() string {
+	totalCost := 0.0
+	totalWaste := resource.NewQuantity(0, resource.BinarySI)
+	totalAllocatable := resource.NewQuantity(0, resource.BinarySI)
+	var sb strings.Builder
+	sb.WriteString("\n")
+	for _, v := range r {
+		totalCost += v.Cost
+		totalWaste.Add(v.Waste)
+		totalAllocatable.Add(v.Allocatable)
+		wr := float64(v.Waste.MilliValue()) / float64(v.Allocatable.MilliValue())
+		_, err := sb.WriteString(fmt.Sprintf("PoolName: %s, Replicas: %d, Cost: %.4f, WasteRatio: %.4f\n", v.WorkerPoolName, v.Replicas, v.Cost, wr))
+		if err != nil {
+			slog.Error("Error while writing to string builder", "error", err)
+		}
+	}
+	totalWasteRatio := float64(totalWaste.MilliValue()) / float64(totalAllocatable.MilliValue())
+	sb.WriteString(fmt.Sprintf("TotalCost: %.4f, TotalWaste: %s, TotalAllocatable: %s, TotalWasteRatio: %.4f", totalCost, totalWaste.String(), totalAllocatable.String(), totalWasteRatio))
+	return sb.String()
 }

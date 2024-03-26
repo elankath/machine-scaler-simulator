@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -614,4 +615,14 @@ func GenerateRandomString(length int) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+func ComputeNodeWaste(node *corev1.Node, pods []corev1.Pod) resource.Quantity {
+	totalAllocatedMem := node.Status.Allocatable.Memory()
+	var totalConsumedMem resource.Quantity
+	for _, pod := range pods {
+		totalConsumedMem.Add(*pod.Spec.Containers[0].Resources.Requests.Memory())
+	}
+	totalAllocatedMem.Sub(totalConsumedMem)
+	return *totalAllocatedMem
 }
