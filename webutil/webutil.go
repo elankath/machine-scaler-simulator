@@ -74,3 +74,16 @@ func GetIntQueryParam(r *http.Request, name string, defVal int) int {
 	}
 	return val
 }
+
+func GetFloatQueryParam(r *http.Request, name string, defVal float64) (float64, error) {
+	valstr := r.URL.Query().Get(name)
+	if valstr == "" {
+		return defVal, nil
+	}
+	val, err := strconv.ParseFloat(valstr, 64)
+	if err != nil {
+		slog.Error("cannot convert to float, using default", "value", valstr, "default", defVal)
+		return defVal, err
+	}
+	return val, nil
+}

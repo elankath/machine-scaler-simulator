@@ -12,7 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-var shootName = "scenario-c1"
+var shootName = "case-up-3"
 var scenarioName = "score4"
 
 type scenarioscore4 struct {
@@ -45,6 +45,16 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	smallCount := webutil.GetIntQueryParam(r, "small", 10)
 	largeCount := webutil.GetIntQueryParam(r, "large", 2)
+	leastWasteWeight, err := webutil.GetFloatQueryParam(r, "leastWaste", 1.0)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
+	leastCostWeight, err := webutil.GetFloatQueryParam(r, "leastCost", 1.0)
+	if err != nil {
+		webutil.InternalError(w, err)
+		return
+	}
 
 	smallPods, err := constructPods("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount)
 	if err != nil {
@@ -59,9 +69,9 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	allPods := make([]corev1.Pod, 0, smallCount+largeCount)
 	allPods = append(smallPods, largePods...)
 
-	recommender := nodescorer.NewRecommender(s.engine, scenarioName, shootName, nodescorer.StrategyWeights{
-		LeastWaste: 1.0,
-		LeastCost:  1.5,
+	recommender := nodescorer.NewRecommender(s.engine, scenarioName, shootName, scalesim.StrategyWeights{
+		LeastWaste: leastWasteWeight,
+		LeastCost:  leastCostWeight,
 	}, w)
 
 	shoot, err := s.engine.ShootAccess(shootName).GetShootObj()
@@ -74,7 +84,7 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		return
 	}
-	webutil.Log(w, fmt.Sprintf("Recommendation: %+v", recommendation))
+	webutil.Log(w, fmt.Sprintf("Recommendation: %s", recommendation.String()))
 	webutil.Log(w, fmt.Sprintf("Scenario-%s Completed!", s.Name()))
 }
 

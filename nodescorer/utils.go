@@ -9,7 +9,7 @@ import (
 	"log/slog"
 )
 
-func computeNodeRunResult(strategy StrategyWeights, scaledNode *corev1.Node, podListForRun []corev1.Pod, workerPools []v1beta1.Worker) (scalesim.NodeRunResult, error) {
+func computeNodeRunResult(strategy scalesim.StrategyWeights, scaledNode *corev1.Node, podListForRun []corev1.Pod, workerPools []v1beta1.Worker) (scalesim.NodeRunResult, error) {
 	var nodeScore scalesim.NodeRunResult
 	nodeScore.NodeName = scaledNode.Name
 
