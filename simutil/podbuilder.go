@@ -2,10 +2,10 @@ package simutil
 
 import (
 	"fmt"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/pointer"
 	"k8s.io/utils/ptr"
 )
 
@@ -21,6 +21,7 @@ type PodBuilder struct {
 	schedulerName   string
 	nodeName        string
 	resourceRequest corev1.ResourceList
+	tsc             []corev1.TopologySpreadConstraint
 }
 
 func NewPodBuilder() *PodBuilder {
@@ -50,8 +51,8 @@ func (p *PodBuilder) Namespace(namespace string) *PodBuilder {
 	return p
 }
 
-func (p *PodBuilder) AddLabel(key string, value string) *PodBuilder {
-	p.objectMeta.Labels[key] = value
+func (p *PodBuilder) AddLabels(labels map[string]string) *PodBuilder {
+	p.objectMeta.Labels = labels
 	return p
 }
 
@@ -75,6 +76,24 @@ func (p *PodBuilder) NodeName(nodeName string) *PodBuilder {
 	return p
 }
 
+func (p *PodBuilder) TopologySpreadConstraint(topologyKey *string, maxSkew *int, labels map[string]string) *PodBuilder {
+	if topologyKey == nil || maxSkew == nil || labels == nil {
+		return p
+	}
+	p.tsc = []corev1.TopologySpreadConstraint{
+		{
+			TopologyKey:       *topologyKey,
+			WhenUnsatisfiable: corev1.DoNotSchedule,
+			MaxSkew:           int32(*maxSkew),
+			LabelSelector: &metav1.LabelSelector{
+				MatchLabels: labels,
+			},
+			MinDomains: pointer.Int32(3),
+		},
+	}
+	return p
+}
+
 func (p *PodBuilder) Build() (*corev1.Pod, error) {
 	if p.resourceRequest == nil || len(p.resourceRequest) == 0 {
 		return nil, fmt.Errorf("resource request must be set")
@@ -94,6 +113,7 @@ func (p *PodBuilder) Build() (*corev1.Pod, error) {
 			},
 			NodeName:                      p.nodeName,
 			TerminationGracePeriodSeconds: ptr.To(int64(0)),
+			TopologySpreadConstraints:     p.tsc,
 		},
 	}, nil
 }

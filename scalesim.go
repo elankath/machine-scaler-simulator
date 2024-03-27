@@ -50,7 +50,7 @@ type VirtualClusterAccess interface {
 	AddTaintToNode(context.Context, *corev1.Node) error
 
 	// CreatePods creates the given slice of k8s Pods in the virtual cluster
-	CreatePods(context.Context, ...corev1.Pod) error
+	CreatePods(context.Context, string, ...corev1.Pod) error
 
 	CreatePodsWithNodeAndScheduler(context.Context, string, string, ...corev1.Pod) error
 
@@ -153,19 +153,19 @@ type NodePool struct {
 }
 
 type NodePodAssignment struct {
-	NodeName        string
-	ZoneName        string
-	PoolName        string
-	InstanceType    string
-	PodNameAndCount map[string]int
+	NodeName     string
+	ZoneName     string
+	PoolName     string
+	InstanceType string
+	PodNames     []string
 }
 
 func (n NodePodAssignment) String() string {
 	var sb strings.Builder
 	sb.WriteString("(Node: " + n.NodeName + " ,Zone: " + n.ZoneName + ", PoolName: " + n.PoolName + ", InstanceType: " + n.InstanceType + ", PodAssignments: ")
-	for k, v := range n.PodNameAndCount {
+	for _, v := range n.PodNames {
 		sb.WriteString("[")
-		sb.WriteString(k + ":" + strconv.Itoa(v))
+		sb.WriteString(v)
 		sb.WriteString("],")
 	}
 	sb.WriteString(")")
