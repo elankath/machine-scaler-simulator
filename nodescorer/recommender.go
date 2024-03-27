@@ -22,15 +22,17 @@ type Recommender struct {
 	shootName       string
 	strategyWeights scalesim.StrategyWeights
 	logWriter       http.ResponseWriter
+	podOrder        string
 }
 
-func NewRecommender(engine scalesim.Engine, scenarioName, shootName string, strategyWeights scalesim.StrategyWeights, logWriter http.ResponseWriter) *Recommender {
+func NewRecommender(engine scalesim.Engine, scenarioName, shootName, podOrder string, strategyWeights scalesim.StrategyWeights, logWriter http.ResponseWriter) *Recommender {
 	return &Recommender{
 		engine:          engine,
 		scenarioName:    scenarioName,
 		shootName:       shootName,
 		strategyWeights: strategyWeights,
 		logWriter:       logWriter,
+		podOrder:        podOrder,
 	}
 }
 
@@ -76,7 +78,7 @@ func (r *Recommender) Run(ctx context.Context, shoot *v1beta1.Shoot, unscheduled
 			r.logError(err)
 			return recommendations, err
 		}
-		if err = r.engine.VirtualClusterAccess().CreatePods(ctx, unscheduledPods...); err != nil {
+		if err = r.engine.VirtualClusterAccess().CreatePods(ctx, r.podOrder, unscheduledPods...); err != nil {
 			r.logError(err)
 			return recommendations, err
 		}
@@ -98,10 +100,22 @@ func (r *Recommender) Run(ctx context.Context, shoot *v1beta1.Shoot, unscheduled
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error")
 			return recommendations, err
 		}
+		nodePodAssignments, err := simutil.GetNodePodAssignments(ctx, r.engine.VirtualClusterAccess())
+		if err != nil {
+			r.logError(err)
+			return recommendations, err
+		}
+		webutil.Log(r.logWriter, fmt.Sprintf("At the end of run #%d, Node Pod Assignments: %v", runCounter, nodePodAssignments))
 		recommendation.Waste.Add(simutil.ComputeNodeWaste(scaledNode, assignedPods))
 		recommendation.Allocatable.Add(*scaledNode.Status.Allocatable.Memory())
 		recommendations[winnerNodeScore.Pool.Name] = recommendation
-		unscheduledPods = simutil.DeleteAssignedPods(unscheduledPods, assignedPods)
+
+		allAssignedPods, err := simutil.GetAllAssignedPods(ctx, r.engine.VirtualClusterAccess())
+		if err != nil {
+			r.logError(err)
+			return recommendations, err
+		}
+		unscheduledPods = simutil.DeleteAssignedPods(unscheduledPods, allAssignedPods)
 		webutil.Log(r.logWriter, fmt.Sprintf("Removing unscheduled pods #%d, at the end of run #%d", len(unscheduledPods), runCounter))
 		if err = r.engine.VirtualClusterAccess().DeletePods(ctx, unscheduledPods...); err != nil {
 			r.logError(err)
@@ -139,7 +153,7 @@ func (r *Recommender) computeNodeScores(ctx context.Context, shoot *v1beta1.Shoo
 			webutil.Log(r.logWriter, "No new node can be created for pool "+pool.Name+" as it has reached its max. Skipping this pool.")
 			continue
 		}
-		if err = r.engine.VirtualClusterAccess().CreatePods(ctx, candidatePods...); err != nil {
+		if err = r.engine.VirtualClusterAccess().CreatePods(ctx, r.podOrder, candidatePods...); err != nil {
 			webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
 			return nil
 		}

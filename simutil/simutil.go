@@ -124,14 +124,15 @@ loop:
 			if err != nil {
 				slog.Error("cannot get pod scheduling events, this will be retried", "error", err)
 			}
-			webutil.Log(w, fmt.Sprintf("Received %d events", len(events)))
+			//webutil.Log(w, fmt.Sprintf("Received %d events", len(events)))
 			for _, event := range events {
 				switch event.Reason {
 				case "FailedScheduling":
-					webutil.Log(w, fmt.Sprintf("Pod %s failed scheduling at %s", event.InvolvedObject.Name, event.EventTime.Time.String()))
+					//webutil.Log(w, fmt.Sprintf("Pod %s failed scheduling at %s", event.InvolvedObject.Name, event.EventTime.Time.String()))
 					unscheduledPodNames.Insert(event.InvolvedObject.Name)
 				case "Scheduled":
-					webutil.Log(w, fmt.Sprintf("Pod %s scheduled at %s", event.InvolvedObject.Name, event.EventTime.Time.String()))
+
+					//webutil.Log(w, fmt.Sprintf("Pod %s scheduled at %s to %s", event.InvolvedObject.Name, event.EventTime.Time.String()))
 					scheduledPodNames.Insert(event.InvolvedObject.Name)
 					podNames = slices.DeleteFunc(podNames, func(podName string) bool {
 						return podName == event.InvolvedObject.Name
@@ -213,11 +214,10 @@ func GetNodePodAssignments(ctx context.Context, a scalesim.VirtualClusterAccess)
 	assignMap := make(map[string]scalesim.NodePodAssignment)
 	for _, n := range nodes {
 		assignMap[n.Name] = scalesim.NodePodAssignment{
-			NodeName:        n.Name,
-			ZoneName:        n.Labels["topology.kubernetes.io/zone"],
-			PoolName:        n.Labels["worker.gardener.cloud/pool"],
-			InstanceType:    n.Labels["node.kubernetes.io/instance-type"],
-			PodNameAndCount: make(map[string]int),
+			NodeName:     n.Name,
+			ZoneName:     n.Labels["topology.kubernetes.io/zone"],
+			PoolName:     n.Labels["worker.gardener.cloud/pool"],
+			InstanceType: n.Labels["node.kubernetes.io/instance-type"],
 		}
 	}
 	pods, err := a.ListPods(ctx)
@@ -229,12 +229,14 @@ func GetNodePodAssignments(ctx context.Context, a scalesim.VirtualClusterAccess)
 		if nodeName == "" {
 			continue
 		}
-		podNameCategory := p.ObjectMeta.GenerateName
-		a := assignMap[nodeName]
-		a.PodNameAndCount[podNameCategory]++
+		nps, ok := assignMap[nodeName]
+		if ok {
+			nps.PodNames = append(nps.PodNames, p.Name)
+		}
+		assignMap[nodeName] = nps
 	}
 	for n, a := range assignMap {
-		if len(a.PodNameAndCount) == 0 {
+		if len(a.PodNames) == 0 {
 			delete(assignMap, n)
 		}
 	}
@@ -427,7 +429,7 @@ func GetScalerRecommendation(ctx context.Context, a scalesim.VirtualClusterAcces
 		if _, ok := virtualNodes[assignment.NodeName]; !ok {
 			continue
 		}
-		if len(assignment.PodNameAndCount) > 0 {
+		if len(assignment.PodNames) > 0 {
 			key := fmt.Sprintf("%s/%s", assignment.PoolName, assignment.ZoneName)
 			recommendation[key]++
 		}
@@ -516,6 +518,20 @@ func DeleteNodeAndResetPods(ctx context.Context, a scalesim.VirtualClusterAccess
 	return adjustedPods, deployTime, nil
 }
 
+func GetAllAssignedPods(ctx context.Context, a scalesim.VirtualClusterAccess) ([]corev1.Pod, error) {
+	pods, err := a.ListPods(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var assignedPods []corev1.Pod
+	for _, pod := range pods {
+		if pod.Spec.NodeName != "" {
+			assignedPods = append(assignedPods, pod)
+		}
+	}
+	return assignedPods, nil
+}
+
 func GetPodsAssignedToNode(ctx context.Context, a scalesim.VirtualClusterAccess, nodeName string) ([]corev1.Pod, error) {
 	pods, err := a.ListPods(ctx)
 	if err != nil {
@@ -530,12 +546,12 @@ func GetPodsAssignedToNode(ctx context.Context, a scalesim.VirtualClusterAccess,
 	return assignedPods, nil
 }
 
-func DeleteAssignedPods(podListForRun []corev1.Pod, assignedPods []corev1.Pod) []corev1.Pod {
+func DeleteAssignedPods(unscheduledPods []corev1.Pod, allAssignedPods []corev1.Pod) []corev1.Pod {
 	assignedPodsByName := make(map[string]corev1.Pod)
-	for _, pod := range assignedPods {
+	for _, pod := range allAssignedPods {
 		assignedPodsByName[pod.Name] = pod
 	}
-	return slices.DeleteFunc(podListForRun, func(p corev1.Pod) bool {
+	return slices.DeleteFunc(unscheduledPods, func(p corev1.Pod) bool {
 		_, ok := assignedPodsByName[p.Name]
 		return ok
 	})

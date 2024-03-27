@@ -87,3 +87,11 @@ func GetFloatQueryParam(r *http.Request, name string, defVal float64) (float64, 
 	}
 	return val, nil
 }
+
+func GetStringQueryParam(r *http.Request, name, defVal string) string {
+	val := r.URL.Query().Get(name)
+	if val == "" {
+		return defVal
+	}
+	return val
+}

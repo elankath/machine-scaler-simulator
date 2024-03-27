@@ -12,7 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-var shootName = "case-up-3"
+var shootName string
 var scenarioName = "score4"
 
 type scenarioscore4 struct {
@@ -36,6 +36,11 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, err)
 		return
 	}
+	shootName = webutil.GetStringQueryParam(r, "shoot", "")
+	if shootName == "" {
+		webutil.InternalError(w, err)
+		return
+	}
 	webutil.Log(w, fmt.Sprintf("Synchronizing virtual nodes with nodes of shoot: %s ...", shootName))
 	err = s.engine.SyncVirtualNodesWithShoot(r.Context(), shootName)
 	if err != nil {
@@ -56,20 +61,61 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	smallPods, err := constructPods("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount)
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
-	largePods, err := constructPods("large", virtualcluster.BinPackingSchedulerName, "", "12Gi", "200m", largeCount)
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
-	allPods := make([]corev1.Pod, 0, smallCount+largeCount)
-	allPods = append(smallPods, largePods...)
+	podOrder := webutil.GetStringQueryParam(r, "podOrder", "noorder")
+	withTSC := webutil.GetStringQueryParam(r, "withTSC", "false")
 
-	recommender := nodescorer.NewRecommender(s.engine, scenarioName, shootName, scalesim.StrategyWeights{
+	allPods := make([]corev1.Pod, 0, smallCount+largeCount)
+	smallPodLabels := map[string]string{
+		"app.kubernetes.io/name": "score4",
+		"foo":                    "bar",
+	}
+	largePodLabels := map[string]string{
+		"app.kubernetes.io/name": "score4",
+		"foo":                    "bar2",
+	}
+
+	if withTSC == "true" {
+		webutil.Log(w, "Creating Pods with TopologySpreadConstraints")
+		topologyKeyForZone := "failure-domain.beta.kubernetes.io/zone"
+		maxSkew := 1
+		matchingTSCLabels := map[string]string{
+			"foo": "bar",
+		}
+		smallPods, err := constructPodsWithTSC("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount, &topologyKeyForZone, &maxSkew, matchingTSCLabels, smallPodLabels)
+		if err != nil {
+			webutil.InternalError(w, err)
+			return
+		}
+		topologyKeyForHostname := "kubernetes.io/hostname"
+		matchingTSCLabels = map[string]string{
+			"foo": "bar2",
+		}
+		largePods, err := constructPodsWithTSC("large", virtualcluster.BinPackingSchedulerName, "", "12Gi", "200m", largeCount, &topologyKeyForHostname, &maxSkew, matchingTSCLabels, largePodLabels)
+		if err != nil {
+			webutil.InternalError(w, err)
+			return
+		}
+		allPods = append(allPods, smallPods...)
+		allPods = append(allPods, largePods...)
+	} else {
+		delete(smallPodLabels, "foo")
+		smallPods, err := constructPodsWithoutTSC("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount, smallPodLabels)
+		if err != nil {
+			webutil.InternalError(w, err)
+			return
+		}
+
+		delete(largePodLabels, "foo")
+		largePods, err := constructPodsWithoutTSC("large", virtualcluster.BinPackingSchedulerName, "", "12Gi", "200m", largeCount, largePodLabels)
+		if err != nil {
+			webutil.InternalError(w, err)
+			return
+		}
+		allPods = append(allPods, smallPods...)
+		allPods = append(allPods, largePods...)
+	}
+
+	recommender := nodescorer.NewRecommender(s.engine, scenarioName, shootName, podOrder, scalesim.StrategyWeights{
 		LeastWaste: leastWasteWeight,
 		LeastCost:  leastCostWeight,
 	}, w)
@@ -102,7 +148,15 @@ func (s scenarioscore4) Name() string {
 	return scenarioName
 }
 
-func constructPods(namePrefix string, schedulerName string, nodeName string, memRequest, cpuRequest string, count int) ([]corev1.Pod, error) {
+func constructPodsWithTSC(namePrefix string, schedulerName string, nodeName string, memRequest, cpuRequest string, count int, topologyKey *string, maxSkew *int, matchingTSCLabels map[string]string, labels map[string]string) ([]corev1.Pod, error) {
+	return constructPods(namePrefix, schedulerName, nodeName, memRequest, cpuRequest, count, topologyKey, maxSkew, matchingTSCLabels, labels)
+}
+
+func constructPodsWithoutTSC(namePrefix string, schedulerName string, nodeName string, memRequest, cpuRequest string, count int, labels map[string]string) ([]corev1.Pod, error) {
+	return constructPods(namePrefix, schedulerName, nodeName, memRequest, cpuRequest, count, nil, nil, nil, labels)
+}
+
+func constructPods(namePrefix string, schedulerName string, nodeName string, memRequest, cpuRequest string, count int, topologyKey *string, maxSkew *int, matchingTSCLabels map[string]string, labels map[string]string) ([]corev1.Pod, error) {
 	pods := make([]corev1.Pod, 0, count)
 	for i := 0; i < count; i++ {
 		suffix, err := simutil.GenerateRandomString(4)
@@ -112,10 +166,11 @@ func constructPods(namePrefix string, schedulerName string, nodeName string, mem
 		p, err := simutil.NewPodBuilder().
 			Name(namePrefix+"-"+suffix).
 			SchedulerName(schedulerName).
-			AddLabel("app.kubernetes.io/name", "score4").
+			AddLabels(labels).
 			NodeName(nodeName).
 			RequestMemory(memRequest).
 			RequestCPU(cpuRequest).
+			TopologySpreadConstraint(topologyKey, maxSkew, matchingTSCLabels).
 			Build()
 		if err != nil {
 			return nil, err

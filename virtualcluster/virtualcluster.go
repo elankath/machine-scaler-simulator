@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"slices"
 	"syscall"
 	"time"
 
@@ -87,7 +88,13 @@ func (a *access) DeleteNodesWithMatchingLabels(ctx context.Context, labels map[s
 	return a.client.DeleteAllOf(ctx, &corev1.Node{}, client.MatchingLabels(labels))
 }
 
-func (a *access) CreatePods(ctx context.Context, pods ...corev1.Pod) error {
+func (a *access) CreatePods(ctx context.Context, podOrder string, pods ...corev1.Pod) error {
+	if podOrder == "desc" {
+		//TODO: include other resources for sorting
+		slices.SortFunc(pods, func(i, j corev1.Pod) int {
+			return -i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
+		})
+	}
 	for _, pod := range pods {
 		clone := pod.DeepCopy()
 		clone.ObjectMeta.UID = ""

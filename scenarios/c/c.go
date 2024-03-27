@@ -11,7 +11,7 @@ import (
 	"github.com/elankath/scaler-simulator/webutil"
 )
 
-var shootName = "scenario-c"
+var shootName = "case-up-3"
 var scenarioName = "C"
 
 type scenarioC struct {
