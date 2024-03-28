@@ -153,11 +153,11 @@ type NodePool struct {
 }
 
 type NodePodAssignment struct {
-	NodeName     string
-	ZoneName     string
-	PoolName     string
-	InstanceType string
-	PodNames     []string
+	NodeName     string   `json:"nodeName"`
+	ZoneName     string   `json:"zoneName"`
+	PoolName     string   `json:"poolName"`
+	InstanceType string   `json:"instanceType"`
+	PodNames     []string `json:"podNames"`
 }
 
 func (n NodePodAssignment) String() string {

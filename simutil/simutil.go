@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -641,4 +642,12 @@ func ComputeNodeWaste(node *corev1.Node, pods []corev1.Pod) resource.Quantity {
 	}
 	totalAllocatedMem.Sub(totalConsumedMem)
 	return *totalAllocatedMem
+}
+
+func AsJson(nodePodAssignments []scalesim.NodePodAssignment) (string, error) {
+	jsonBytes, err := json.MarshalIndent(nodePodAssignments, "", "	")
+	if err != nil {
+		return "", err
+	}
+	return string(jsonBytes), nil
 }

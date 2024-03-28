@@ -9,7 +9,6 @@ import (
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/simutil"
-	"github.com/elankath/scaler-simulator/virtualcluster"
 	"github.com/elankath/scaler-simulator/webutil"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -60,7 +59,7 @@ func ScaleDownOrderedByDescendingCost(ctx context.Context, vca scalesim.VirtualC
 		adjustedPodNames := simutil.PodNames(adjustedPods)
 		webutil.Log(w, fmt.Sprintf("Deploying adjusted Pods...: %s", adjustedPodNames))
 		deployStartTime := time.Now()
-		if err = vca.CreatePodsWithNodeAndScheduler(ctx, virtualcluster.BinPackingSchedulerName, "", adjustedPods...); err != nil {
+		if err = vca.CreatePods(ctx, "", adjustedPods...); err != nil {
 			return deletableNodeNames, err
 		}
 		scheduledPodNames, unscheduledPodNames, err := simutil.WaitForAndRecordPodSchedulingEvents(ctx, vca, w, deployStartTime, adjustedPods, 10*time.Second)

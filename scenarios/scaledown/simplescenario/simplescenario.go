@@ -1,6 +1,7 @@
 package simplescenario
 
 import (
+	"context"
 	"github.com/elankath/scaler-simulator/scenarios/scaledown"
 	"net/http"
 
@@ -38,7 +39,7 @@ func (s *simpleScaleDown) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		smallPodPath: smallCount,
 		largePodPath: largeCount,
 	}
-	scaledown.NewScenarioRunner(s.engine, shootName, scenarioName, podRequests).Run(r.Context(), w)
+	scaledown.NewScenarioRunner(s.engine, shootName, scenarioName, podRequests).Run(r.Context(), w, s.setUp)
 }
 
 var _ scalesim.Scenario = (*simpleScaleDown)(nil)
@@ -53,4 +54,9 @@ func (s *simpleScaleDown) ShootName() string {
 
 func (s *simpleScaleDown) Name() string {
 	return scenarioName
+}
+
+// TODO: implement me
+func (s *simpleScaleDown) setUp(ctx context.Context) error {
+	return nil
 }

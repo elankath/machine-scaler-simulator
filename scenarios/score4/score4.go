@@ -99,7 +99,7 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		allPods = append(allPods, largePods...)
 	} else {
 		delete(smallPodLabels, "foo")
-		smallPods, err := constructPodsWithoutTSC("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount, smallPodLabels)
+		smallPods, err := constructPodsWithoutTSC("small", virtualcluster.BinPackingSchedulerName, "", "3Gi", "100m", smallCount, smallPodLabels)
 		if err != nil {
 			webutil.InternalError(w, err)
 			return

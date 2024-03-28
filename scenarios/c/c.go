@@ -11,7 +11,7 @@ import (
 	"github.com/elankath/scaler-simulator/webutil"
 )
 
-var shootName = "case-up-3"
+var shootName = "case-up-4"
 var scenarioName = "C"
 
 type scenarioC struct {
@@ -61,7 +61,7 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	smallCount := webutil.GetIntQueryParam(r, "small", 10)
 	largeCount := webutil.GetIntQueryParam(r, "large", 1)
 
-	podSpecPath := "scenarios/c/podLarge.yaml"
+	podSpecPath := "scenarios/c/podLargeWithTSC.yaml"
 	webutil.Log(w, fmt.Sprintf("Deploying podSpec %s with count %d...", podSpecPath, largeCount))
 	err = s.engine.VirtualClusterAccess().CreatePodsFromYaml(r.Context(), podSpecPath, largeCount)
 	if err != nil {
@@ -76,7 +76,7 @@ func (s *scenarioC) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Error("Execution of scenario: "+s.Name()+" ran into error", "error", err)
 	}
 
-	podSpecPath = "scenarios/c/podSmall.yaml"
+	podSpecPath = "scenarios/c/podSmallWithTSC.yaml"
 	if err != nil {
 		webutil.InternalError(w, err)
 		return

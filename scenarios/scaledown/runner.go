@@ -21,6 +21,8 @@ type ScenarioRunner struct {
 	podRequests  map[string]int
 }
 
+type SetupScenarioFunc func(ctx context.Context) error
+
 func NewScenarioRunner(engine scalesim.Engine, shootName, scenarioName string, podRequests map[string]int) *ScenarioRunner {
 	return &ScenarioRunner{
 		engine:       engine,
@@ -30,7 +32,7 @@ func NewScenarioRunner(engine scalesim.Engine, shootName, scenarioName string, p
 	}
 }
 
-func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter) {
+func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter, setupFunc SetupScenarioFunc) {
 	if err := s.resetVirtualCluster(ctx, s.engine, s.shootName); err != nil {
 		webutil.InternalError(w, err)
 		return
@@ -47,12 +49,19 @@ func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter) {
 		return
 	}
 
-	if err := s.deployPods(ctx, w, s.podRequests); err != nil {
+	if err := setupFunc(ctx); err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.scenarioName+" completed with error: "+err.Error())
 		slog.Error("Execution of scenario: "+s.scenarioName+" ran into error", "error", err)
 		webutil.InternalError(w, err)
 		return
 	}
+
+	//if err := s.deployPods(ctx, w, s.podRequests); err != nil {
+	//	webutil.Log(w, "Execution of scenario: "+s.scenarioName+" completed with error: "+err.Error())
+	//	slog.Error("Execution of scenario: "+s.scenarioName+" ran into error", "error", err)
+	//	webutil.InternalError(w, err)
+	//	return
+	//}
 	s.printNodePodAssignments(ctx, w)
 
 	nodes, err := s.engine.VirtualClusterAccess().ListNodes(ctx)
@@ -60,6 +69,7 @@ func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter) {
 		webutil.InternalError(w, err)
 		return
 	}
+
 	scaleDownRecommendation, err := recommender.ScaleDownOrderedByDescendingCost(ctx, s.engine.VirtualClusterAccess(), w, nodes)
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.scenarioName+" completed with error: "+err.Error())
@@ -72,7 +82,8 @@ func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter) {
 
 func (s ScenarioRunner) printNodePodAssignments(ctx context.Context, w http.ResponseWriter) {
 	nodePodAssignments, err := simutil.GetNodePodAssignments(ctx, s.engine.VirtualClusterAccess())
-	webutil.Log(w, fmt.Sprintf("NodePodAssignments BEFORE Scale-Down are: %s", nodePodAssignments))
+	npaAsString, err := simutil.AsJson(nodePodAssignments)
+	webutil.Log(w, fmt.Sprintf("NodePodAssignments BEFORE Scale-Down are: %s", npaAsString))
 	if err != nil {
 		webutil.InternalError(w, err)
 		return
