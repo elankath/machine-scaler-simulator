@@ -142,8 +142,8 @@ func (r *Recommender) runSimulation(ctx context.Context, shoot *v1beta1.Shoot, r
 	if err != nil {
 		return nil, nil, err
 	}
-	var results []runResult
 
+	var results []runResult
 	resultCh := make(chan runResult, len(eligibleNodePools))
 	go r.triggerNodePoolSimulations(ctx, eligibleNodePools, resultCh, runNum)
 
@@ -151,7 +151,7 @@ func (r *Recommender) runSimulation(ctx context.Context, shoot *v1beta1.Shoot, r
 	var errs error
 	for result := range resultCh {
 		if result.err != nil {
-			_ = errors.Join(errs, err)
+			errs = errors.Join(errs, err)
 		} else {
 			results = append(results, result)
 		}
