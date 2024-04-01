@@ -30,6 +30,7 @@ Points to note:
 * These system pods consume node resources
 * VPA can vertically scale these system pods which then increases the resource consumption by the system pods. This could potentially cause eviction of non-system pods.
 
-`Cluster-Autoscaler` does not take into account these system pods while computing the fit or the unscheduled pods. This results in a node being launched by CA but the new node will
-not be able to schedule the unscheduled pods.
+`Cluster-Autoscaler` does not take into account the resource requirements for the system pods (as these are not really deployed yet on the new node). Also if it is `scale-from-zero` case then there is no information regarding reserved resource quantity inside `NodeTemplate` that
+the CA can use when computing `allocatable` resources for a new node and then using it to find the node fitment for unscheduled pod(s). This results in a node being launched by CA to schedule the unscheduled pods. In the live issue each pod had massive memory requirements which 
+were very close to the max allocatable `memory` for the node. So any slight increase in resource consumption by the system pods will result in yet another eviction of the customer pods. This cycle will repeat.
 
