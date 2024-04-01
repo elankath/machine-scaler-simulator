@@ -28,7 +28,7 @@ Gardener deploys the following system pods on every node:
 ```
 Points to note:
 * These system pods consume node resources
-* VPA can vertically scale these system pods which then increases the resource consumption by the system pods. This could potentially cause eviction of pods non-system pods.
+* VPA can vertically scale these system pods which then increases the resource consumption by the system pods. This could potentially cause eviction of non-system pods.
 
 `Cluster-Autoscaler` does not take into account these system pods while computing the fit or the unscheduled pods. This results in a node being launched by CA but the new node will
 not be able to schedule the unscheduled pods.
