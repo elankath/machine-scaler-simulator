@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	shootName    = "scenario-c1"
+	shootName    = "case-up-4"
 	scenarioName = "tsc"
 )
 

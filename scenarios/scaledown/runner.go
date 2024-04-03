@@ -3,8 +3,10 @@ package scaledown
 import (
 	"context"
 	"fmt"
+	"github.com/samber/lo"
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	scalesim "github.com/elankath/scaler-simulator"
@@ -32,7 +34,7 @@ func NewScenarioRunner(engine scalesim.Engine, shootName, scenarioName string, p
 	}
 }
 
-func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter, setupFunc SetupScenarioFunc) {
+func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter) {
 	if err := s.resetVirtualCluster(ctx, s.engine, s.shootName); err != nil {
 		webutil.InternalError(w, err)
 		return
@@ -49,20 +51,20 @@ func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter, setupFun
 		return
 	}
 
-	if err := setupFunc(ctx); err != nil {
-		webutil.Log(w, "Execution of scenario: "+s.scenarioName+" completed with error: "+err.Error())
-		slog.Error("Execution of scenario: "+s.scenarioName+" ran into error", "error", err)
-		webutil.InternalError(w, err)
-		return
-	}
-
-	//if err := s.deployPods(ctx, w, s.podRequests); err != nil {
+	//if err := setupFunc(ctx); err != nil {
 	//	webutil.Log(w, "Execution of scenario: "+s.scenarioName+" completed with error: "+err.Error())
 	//	slog.Error("Execution of scenario: "+s.scenarioName+" ran into error", "error", err)
 	//	webutil.InternalError(w, err)
 	//	return
 	//}
-	s.printNodePodAssignments(ctx, w)
+
+	if err := s.deployPods(ctx, w, s.podRequests); err != nil {
+		webutil.Log(w, "Execution of scenario: "+s.scenarioName+" completed with error: "+err.Error())
+		slog.Error("Execution of scenario: "+s.scenarioName+" ran into error", "error", err)
+		webutil.InternalError(w, err)
+		return
+	}
+	originalNodePodAssignments := s.printAndGetNodePodAssignments(ctx, w)
 
 	nodes, err := s.engine.VirtualClusterAccess().ListNodes(ctx)
 	if err != nil {
@@ -76,18 +78,26 @@ func (s ScenarioRunner) Run(ctx context.Context, w http.ResponseWriter, setupFun
 		slog.Error("Execution of scenario: "+s.scenarioName+" ran into error", "error", err)
 		webutil.InternalError(w, err)
 	}
+	originalNodeNames := lo.Map(originalNodePodAssignments, func(npa scalesim.NodePodAssignment, _ int) string {
+		return npa.NodeName
+	})
+	webutil.Log(w, fmt.Sprintf("Initial Nodes in the cluster: %s", originalNodeNames))
+	scaleDownRecommendation = lo.Filter(scaleDownRecommendation, func(nodeName string, _ int) bool {
+		return slices.Contains(originalNodeNames, nodeName)
+	})
 	webutil.Log(w, fmt.Sprintf("Recommendation for Scale-Down: %s", scaleDownRecommendation))
 	webutil.Log(w, "Scenario-End: "+s.scenarioName)
 }
 
-func (s ScenarioRunner) printNodePodAssignments(ctx context.Context, w http.ResponseWriter) {
+func (s ScenarioRunner) printAndGetNodePodAssignments(ctx context.Context, w http.ResponseWriter) []scalesim.NodePodAssignment {
 	nodePodAssignments, err := simutil.GetNodePodAssignments(ctx, s.engine.VirtualClusterAccess())
 	npaAsString, err := simutil.AsJson(nodePodAssignments)
 	webutil.Log(w, fmt.Sprintf("NodePodAssignments BEFORE Scale-Down are: %s", npaAsString))
 	if err != nil {
 		webutil.InternalError(w, err)
-		return
+		return nil
 	}
+	return nodePodAssignments
 }
 
 func (s ScenarioRunner) deployPods(ctx context.Context, w http.ResponseWriter, podRequests map[string]int) error {
