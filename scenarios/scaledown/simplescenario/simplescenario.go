@@ -39,7 +39,7 @@ func (s *simpleScaleDown) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		smallPodPath: smallCount,
 		largePodPath: largeCount,
 	}
-	scaledown.NewScenarioRunner(s.engine, shootName, scenarioName, podRequests).Run(r.Context(), w, s.setUp)
+	scaledown.NewScenarioRunner(s.engine, shootName, scenarioName, podRequests).Run(r.Context(), w)
 }
 
 var _ scalesim.Scenario = (*simpleScaleDown)(nil)

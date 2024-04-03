@@ -125,17 +125,15 @@ We use the multidimensional scorer algorithm along with kube-scheduler and the f
 ### Case 1 (scenario-a)
 
 ```
-PodA: 5GB -> 10 replicas
+PodA: 2GB -> 10 replicas
 PodB: 12GB -> 4 replicas
-NG1 -> m5.large -> 10
-NG2 -> m5.2xlarge -> 2
+NG1 -> m5.large -> 7
+NG2 -> m5.2xlarge -> 4
 
-Initial pod to node distribution : 10 * NG1 for podAs, 2 * NG2 for podBs
-Undeploy 2 podBs, one from each NG2 node.
-Now run the scale down recommender
+Initial pod to node distribution : 4 * NG1 for podAs, 4 * NG2 for podBs (running default scheduler)
 
-Result (optimal) : 2 * NG2
-Result of scaledown algo : 
+Result (optimal) : 2 * NG1, 4 * NG2
+Result of scaledown algo : 2 * NG1, 4 * NG2
 ```
 
 ### Case 2 (case-up-4)
@@ -150,8 +148,18 @@ NG1 -> m5.Large -> Zone-A (8gb)  (Max : 12)
 NG2 -> m5.xLarge -> Zone-B (16 gb)  (Max : 5) 
 NG3 -> m5.2xLarge -> Zone-C (32 gb) (Max : 5)
 
-Initial pod to node distribution : No load on NG3, 2 NG2 get 2 PodBs, 1 NG1 get 1PodA.
-Result (optimal) : 
-Result of scaledown algo : 
+p1-kpvlb p1-4zgd6 p1-m945v p1-gbbxb p2-k4pz6 p2-fcr4z p2-fv9d5 p2-n42m8 p3-98llf
+Initial pod to node distribution : 4 * NG1, 4 * NG2, 1 * NG3 (running default scheduler)
+Result (optimal) : 3 * NG1, 3 * NG2, 1 * NG3 
+Result of scaledown algo : 3 * NG1, 3 * NG2, 1 * NG3 
 ```
 
+### Case 3 (scenario-a)
+
+```
+PodA: 2GB -> 7 replicas
+NG1 -> m5.large -> 7
+NG2 -> m5.xlarge -> 1
+Result (optimal) : 1 * NG2
+Result of scaledown algo : 3 * NG1
+```
