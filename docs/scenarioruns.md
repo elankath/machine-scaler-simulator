@@ -132,6 +132,8 @@ We use the multidimensional scorer algorithm along with kube-scheduler and the f
 
 ### Case 1 (scenario-a)
 
+` curl -XPOST 'localhost:8080/scenarios/scaledown/simple?small=10&large=4'`
+
 ```
 PodA: 2GB -> 10 replicas
 PodB: 12GB -> 4 replicas
