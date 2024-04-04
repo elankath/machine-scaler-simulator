@@ -2,6 +2,8 @@
 ### <u>ScaleUp</u>
 #### Case 1 (case-up-3)
 
+`curl -XPOST 'localhost:8080/scenarios/score4?small=20&large=0&leastWaste=1.0&leastCost=1.0&shoot=case-up-3'`
+
 ```
 (single zone workerpool)
 PodA : 5Gb -> 20 Replicas
@@ -17,6 +19,8 @@ Result of using ksc+algo (lW = 1,lC = 1.5) -> 11 * NG1 + 1 * NG2
 ```
 
 #### Case 2 (case-up-2)
+
+ `curl -XPOST 'localhost:8080/scenarios/score4?small=10&large=1&leastWaste=1.0&leastCost=1.0&shoot=case-up-2&podOrder=desc'`
 
 ```
 (single zone workerpool)
@@ -37,6 +41,8 @@ Result of using ksc+algo (lW = 1,lC = 1.5,pd = desc) -> 1 * NG1 + 1 * NG3
 
 #### Case 3 (case-up-3)
 
+` curl -XPOST 'localhost:8080/scenarios/score4?small=11&large=1&leastWaste=1.0&leastCost=1.0&shoot=case-up-3&podOrder=desc'`
+
 ```
 (single zone workerpool)
 PodA : 5Gb -> 11 Replicas
@@ -54,6 +60,8 @@ Result of using ksc+algo (lW = 1,lC = 1.5,pd = desc) ->  11 * NG1 + 1 * NG2
 ```
 
 #### Case 4 (case-up-4)
+
+`curl -XPOST 'localhost:8080/scenarios/score4?small=10&large=2&leastWaste=1.0&leastCost=1.0&shoot=case-up-4&podOrder=desc&withTSC=true'`
 
 ```
 (single zone workerpool with each workerpool in different zone)
@@ -138,6 +146,8 @@ Result of scaledown algo : 2 * NG1, 4 * NG2
 
 ### Case 2 (case-up-4)
 
+`curl -XPOST 'localhost:8080/scenarios/scaledown/tsc?small=10&large=2'`
+
 ```
 (single zone workerpool with each workerpool in different zone)
 PodA: 5GB -> 10 replicas  
@@ -148,7 +158,6 @@ NG1 -> m5.Large -> Zone-A (8gb)  (Max : 12)
 NG2 -> m5.xLarge -> Zone-B (16 gb)  (Max : 5) 
 NG3 -> m5.2xLarge -> Zone-C (32 gb) (Max : 5)
 
-p1-kpvlb p1-4zgd6 p1-m945v p1-gbbxb p2-k4pz6 p2-fcr4z p2-fv9d5 p2-n42m8 p3-98llf
 Initial pod to node distribution : 4 * NG1, 4 * NG2, 1 * NG3 (running default scheduler)
 Result (optimal) : 3 * NG1, 3 * NG2, 1 * NG3 
 Result of scaledown algo : 3 * NG1, 3 * NG2, 1 * NG3 
