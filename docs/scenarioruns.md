@@ -15,7 +15,12 @@ Result (optimal) -> 2 * NG2 (lower fragmentation)
 Result of CA -> 2 * NG2
 Result of using ksc(vanilla) -> 12 * NG1 + 1 * NG2
 Result of using ksc+algo (lW = 1,lC = 1) -> 8 * NG1 + 1 * NG2 
-Result of using ksc+algo (lW = 1,lC = 1.5) -> 11 * NG1 + 1 * NG2 
+Result of using ksc+algo (lW = 1,lC = 1.5) -> 11 * NG1 + 1 * NG2
+
+lW = 1, lC = 1
+cost ratio * unscheduled ratio + least waste ratio = total
+NG2:= (8/9)*(8/20) + 4/64 = 0.418
+NG1:= (1/9)*(19/20) + 3/8 = 0.480
 ```
 
 #### Case 2 (case-up-2)
@@ -37,6 +42,21 @@ Result of using ksc+algo (lW = 1,lC = 1, pd = none) -> 1 * NG2 + 1 * NG3 (cannot
 Result of using ksc+algo (lW = 1,lC = 1, pd = desc) -> 1 * NG1 + 1 * NG3 
 Result of using ksc+algo (lW = 1,lC = 1.5,pd = none) -> 1 * NG2 + 1 * NG3 
 Result of using ksc+algo (lW = 1,lC = 1.5,pd = desc) -> 1 * NG1 + 1 * NG3 
+
+lW = 1, lC = 1
+cost ratio * unscheduled ratio + least waste ratio = total
+
+NG1:= (1/11)*(10/11) + 3/8 = 0.457
+NG2:= (2/11)*(10/11) + 4/16 = 0.415
+NG3:= (8/11)*(1/11) + 7/64 = 0.175
+
+NG3 wins!!
+
+NG1:= (1/11)*(0/1) + 3/8
+NG2:= (2/11)*(0/1) + 11/16
+NG3:= (8/11)*(0/1) + 59/64
+
+NG1 wins!!
 ```
 
 #### Case 3 (case-up-3)
@@ -83,7 +103,7 @@ Result of using ksc+algo (lW = 1,lC = 1.5,pd = none) -> 3 * NG1 + 4 * NG2 + 1 * 
 Result of using ksc+algo (lW = 1,lC = 1.5,pd = desc) -> 3 * NG1 + 4 * NG2 + 1 * NG3 
 ```
 
-####  Case 5 
+####  Case 5 (case-up-5)
 
 ```
 PodA : 3Gb -> 15Repl

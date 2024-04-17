@@ -110,6 +110,17 @@ func (a *access) CreatePods(ctx context.Context, podOrder string, pods ...corev1
 	return nil
 }
 
+func (a *access) AddPods(ctx context.Context, pods ...corev1.Pod) error {
+	for _, pod := range pods {
+		err := a.client.Create(ctx, &pod)
+		if err != nil {
+			slog.Error("Error creating the pod.", "error", err)
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *access) CreatePodsWithNodeAndScheduler(ctx context.Context, schedulerName, nodeName string, pods ...corev1.Pod) error {
 	for _, pod := range pods {
 		var podObjMeta metav1.ObjectMeta

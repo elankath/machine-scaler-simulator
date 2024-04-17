@@ -28,7 +28,8 @@ func computeNodeRunResult(strategy scalesim.StrategyWeights, scaledNode *corev1.
 	nodeScore.NumAssignedPodsToNode = len(targetNodeAssignedPods)
 	// TODO enhance the wastescore by considering all resources
 	totalMemoryConsumed := int64(0)
-	totalAllocatableMemory := scaledNode.Status.Allocatable.Memory().MilliValue()
+	//totalAllocatableMemory := scaledNode.Status.Allocatable.Memory().MilliValue()
+	totalMemoryCapacity := scaledNode.Status.Capacity.Memory().MilliValue()
 	for _, pod := range targetNodeAssignedPods {
 		for _, container := range pod.Spec.Containers {
 			totalMemoryConsumed += container.Resources.Requests.Memory().MilliValue()
@@ -36,10 +37,10 @@ func computeNodeRunResult(strategy scalesim.StrategyWeights, scaledNode *corev1.
 		slog.Info("NodPodAssignment: ", "pod", pod.Name, "node", pod.Spec.NodeName, "memory", pod.Spec.Containers[0].Resources.Requests.Memory().MilliValue())
 	}
 
-	nodeScore.WasteRatio = strategy.LeastWaste * (float64(totalAllocatableMemory-totalMemoryConsumed) / float64(totalAllocatableMemory))
+	nodeScore.WasteRatio = strategy.LeastWaste * (float64(totalMemoryCapacity-totalMemoryConsumed) / float64(totalMemoryCapacity))
 	nodeScore.UnscheduledRatio = float64(len(podListForRun)-totalAssignedPods) / float64(len(podListForRun))
 	nodeScore.CostRatio = strategy.LeastCost * getCostRatio(scaledNode, workerPools)
-	nodeScore.CumulativeScore = nodeScore.WasteRatio + nodeScore.UnscheduledRatio + nodeScore.CostRatio
+	nodeScore.CumulativeScore = nodeScore.WasteRatio + (nodeScore.UnscheduledRatio * nodeScore.CostRatio)
 
 	for _, pool := range workerPools {
 		if scaledNode.Labels["worker.gardener.cloud/pool"] == pool.Name {

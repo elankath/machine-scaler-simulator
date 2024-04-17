@@ -52,6 +52,9 @@ type VirtualClusterAccess interface {
 	// CreatePods creates the given slice of k8s Pods in the virtual cluster
 	CreatePods(context.Context, string, ...corev1.Pod) error
 
+	// AddPods adds pods in the virtual cluster
+	AddPods(context.Context, ...corev1.Pod) error
+
 	CreatePodsWithNodeAndScheduler(context.Context, string, string, ...corev1.Pod) error
 
 	// CreatePodsFromYaml loads the pod yaml at the given podYamlPath and creates Pods for given number of replicas.
