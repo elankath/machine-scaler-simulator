@@ -89,7 +89,7 @@ func recreateNodeWithPods(ctx context.Context, vca scalesim.VirtualClusterAccess
 	if err := vca.AddNodes(ctx, node); err != nil {
 		return err
 	}
-	if err := vca.RemoveTaintFromVirtualNode(ctx, node.Name); err != nil {
+	if err := vca.RemoveAllTaintsFromVirtualNode(ctx, node.Name); err != nil {
 		return err
 	}
 	for _, pod := range pods {

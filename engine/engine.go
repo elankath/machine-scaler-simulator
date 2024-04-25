@@ -7,6 +7,7 @@ import (
 	"github.com/elankath/scaler-simulator/scenarios/scaledown/simplescenario"
 	"github.com/elankath/scaler-simulator/scenarios/scaledown/tscscenario"
 	"github.com/elankath/scaler-simulator/scenarios/score4"
+	"github.com/elankath/scaler-simulator/scenarios/score5"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -95,6 +96,9 @@ func (e *engine) addRoutes() {
 	scenarioScore4 := score4.New(e)
 	e.mux.Handle("POST /scenarios/"+scenarioScore4.Name(), scenarioScore4)
 
+	scenarioScore5 := score5.New(e)
+	e.mux.Handle("POST /scenarios/"+scenarioScore5.Name(), scenarioScore5)
+
 	scenarioScaledownSimple := simplescenario.New(e)
 	e.mux.Handle("POST /scenarios/scaledown/"+scenarioScaledownSimple.Name(), scenarioScaledownSimple)
 
@@ -143,7 +147,7 @@ func (e *engine) SyncVirtualNodesWithShoot(ctx context.Context, shootName string
 		slog.Error("cannot add nodes to virtual-cluster.", "error", err)
 		return err
 	}
-	//err = e.VirtualClusterAccess().RemoveTaintFromVirtualNodes(ctx)
+	//err = e.VirtualClusterAccess().RemoveAllTaintsFromVirtualNodes(ctx)
 	//if err != nil {
 	//	slog.Error("cannot un-taint node(s).", "error", err)
 	//	return err
@@ -193,7 +197,7 @@ func (e *engine) ScaleWorkerPoolsTillMaxOrNoUnscheduledPods(ctx context.Context,
 				webutil.InternalError(w, err)
 				return totalNodesCreated, err
 			}
-			if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
+			if err := e.virtualAccess.RemoveAllTaintsFromVirtualNodes(ctx); err != nil {
 				webutil.InternalError(w, err)
 				return totalNodesCreated, err
 			}
@@ -220,7 +224,7 @@ func (e *engine) ScaleAllWorkerPoolsTillMax(ctx context.Context, scenarioName st
 			return totalNodesCreated, err
 		}
 		webutil.Log(w, fmt.Sprintf("Created virtual nodes in pool: %q till max: %d", pool.Name, pool.Maximum))
-		if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
+		if err := e.virtualAccess.RemoveAllTaintsFromVirtualNodes(ctx); err != nil {
 			return totalNodesCreated, err
 		}
 		totalNodesCreated += numNodesCreated
@@ -237,7 +241,7 @@ func (e *engine) ScaleWorkerPoolsTillNumZonesMultPoolsMax(ctx context.Context, s
 			return totalNodesCreated, err
 		}
 		webutil.Log(w, fmt.Sprintf("Created virtual nodes in pool %q till max %d", pool.Name, pool.Maximum))
-		if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
+		if err := e.virtualAccess.RemoveAllTaintsFromVirtualNodes(ctx); err != nil {
 			return totalNodesCreated, err
 		}
 		totalNodesCreated += len(pool.Zones) * (int)(pool.Maximum)
@@ -252,7 +256,7 @@ func (e *engine) ScaleWorkerPoolTillMax(ctx context.Context, scenarioName string
 		return numNodesCreated, err
 	}
 	webutil.Log(w, fmt.Sprintf("Created virtual nodes in pool: %q till max: %d", pool.Name, pool.Maximum))
-	if err := e.virtualAccess.RemoveTaintFromVirtualNodes(ctx); err != nil {
+	if err := e.virtualAccess.RemoveAllTaintsFromVirtualNodes(ctx); err != nil {
 		return numNodesCreated, err
 	}
 	return numNodesCreated, nil

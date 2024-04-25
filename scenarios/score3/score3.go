@@ -98,7 +98,7 @@ package score3
 //				webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 //				return
 //			}
-//			err = s.engine.VirtualClusterAccess().RemoveTaintFromVirtualNodes(r.Context())
+//			err = s.engine.VirtualClusterAccess().RemoveAllTaintsFromVirtualNodes(r.Context())
 //			if err != nil {
 //				webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 //				return
@@ -143,7 +143,7 @@ package score3
 //			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 //			return
 //		}
-//		err = s.engine.VirtualClusterAccess().RemoveTaintFromVirtualNodes(r.Context())
+//		err = s.engine.VirtualClusterAccess().RemoveAllTaintsFromVirtualNodes(r.Context())
 //		if err != nil {
 //			webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 //			return

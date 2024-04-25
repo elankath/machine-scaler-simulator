@@ -29,26 +29,26 @@ import (
 )
 
 /*
-	for {
-		unscheduledPods = determine unscheduled pods
-		if noUnscheduledPods then exit early
-		- runSimulation
- 		  - Start a go-routine for each of candidate nodePool which are eligible
-				- eligibility: max is not yet reached for that nodePool
-              For each go-routine:
-                Setup:
-                    - create a unique label that will get added to all nodes and pods
-                	- copy previous winner nodes and add a taint.
-                	- copy the deployed pods with node names assigned and add toleration to the taint.
-	            - scale up one node, add a taint and only copy of pods will have toleration to that taint.
-                - copy of unscheduled pods, add a toleration for this taint.
-                - wait for pods to be scheduled
-                - compute node score.
-	}
+		for {
+			unscheduledPods = determine unscheduled pods
+			if noUnscheduledPods then exit early
+			- runSimulation
+	 		  - Start a go-routine for each of candidate nodePool which are eligible
+					- eligibility: max is not yet reached for that nodePool
+	              For each go-routine:
+	                Setup:
+	                    - create a unique label that will get added to all nodes and pods
+	                	- copy previous winner nodes and add a taint.
+	                	- copy the deployed pods with node names assigned and add toleration to the taint.
+		            - scale up one node, add a taint and only copy of pods will have toleration to that taint.
+	                - copy of unscheduled pods, add a toleration for this taint.
+	                - wait for pods to be scheduled
+	                - compute node score.
+		}
 */
-const resourceNameFormat = "%s-SimRun-%s"
+const resourceNameFormat = "%s-simrun-%s"
 
-type strategyWeights struct {
+type StrategyWeights struct {
 	LeastWaste float64
 	LeastCost  float64
 }
@@ -62,12 +62,12 @@ type Recommendation struct {
 
 type Recommender struct {
 	engine                 scalesim.Engine
-	shootNodes             []corev1.Node
 	scenarioName           string
 	shootName              string
-	strategyWeights        strategyWeights
+	strategyWeights        StrategyWeights
 	logWriter              http.ResponseWriter
 	state                  simulationState
+	podOrder               string
 	instanceTypeCostRatios map[string]float64
 }
 
@@ -135,15 +135,15 @@ func (s *simulationState) updateEligibleNodePools(recommendation Recommendation)
 	}
 }
 
-func NewRecommender(engine scalesim.Engine, shootNodes []corev1.Node, scenarioName, shootName string, strategyWeights strategyWeights, logWriter http.ResponseWriter) *Recommender {
+func NewRecommender(engine scalesim.Engine, scenarioName, shootName, podOrder string, strategyWeights StrategyWeights, logWriter http.ResponseWriter) *Recommender {
 	return &Recommender{
 		engine:                 engine,
-		shootNodes:             shootNodes,
 		scenarioName:           scenarioName,
 		shootName:              shootName,
 		strategyWeights:        strategyWeights,
 		logWriter:              logWriter,
 		instanceTypeCostRatios: make(map[string]float64),
+		podOrder:               podOrder,
 	}
 }
 
@@ -175,7 +175,7 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 
 		recommendation, winnerRunResult, err := r.runSimulation(ctx, runNumber)
 		if err != nil {
-			webutil.Log(r.logWriter, fmt.Sprintf("Unable to get eligible node pools for shoot %s, err: %v", shoot.Name, err))
+			webutil.Log(r.logWriter, fmt.Sprintf("runSimulation for shoot %s failed, err: %v", shoot.Name, err))
 			break
 		}
 		if recommendation == nil {
@@ -263,6 +263,9 @@ func (r *Recommender) syncWinningResult(ctx context.Context, winningRunResult *r
 	if err = r.engine.VirtualClusterAccess().AddNodes(ctx, node); err != nil {
 		return err
 	}
+	if err := r.engine.VirtualClusterAccess().RemoveTaintFromVirtualNode(ctx, node.Name, "node.kubernetes.io/not-ready"); err != nil {
+		return err
+	}
 	var podsToUpdate []corev1.Pod
 	for nodeName, simPodObjectKeys := range winningRunResult.nodeToPods {
 		for _, simPodObjectKey := range simPodObjectKeys {
@@ -320,6 +323,9 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 			resultCh <- createErrorResult(err)
 			return
 		}
+		if err = r.engine.VirtualClusterAccess().RemoveTaintFromVirtualNodes(ctx, "node.kubernetes.io/not-ready"); err != nil {
+			return
+		}
 		// in production code FAKE KAPI will not return any error. This is only for POC code where an envtest KAPI is used.
 		_, _, err = simutil.WaitForAndRecordPodSchedulingEvents(ctx, r.engine.VirtualClusterAccess(), r.logWriter, time.Now(), r.state.unscheduledPods, 10*time.Second)
 		if err != nil {
@@ -374,7 +380,7 @@ func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Co
 	var nodeName string
 	taints := make([]corev1.Taint, 0, 1)
 	if forSimRun {
-		nodeName = nodeNamePrefix + "-SimRun-" + runRef.value
+		nodeName = nodeNamePrefix + "-simrun-" + runRef.value
 		nodeLabels[runRef.key] = runRef.value
 		taints = append(taints, corev1.Taint{Key: runRef.key, Effect: corev1.TaintEffectNoSchedule})
 	} else {
@@ -401,6 +407,7 @@ func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Co
 	return node, nil
 }
 
+// TODO(rishabh-11): This needs to modified to return the list of unscheduled pods.
 func (r *Recommender) setupNodePoolSimRun(ctx context.Context, runRef simRunRef) error {
 	var nodeList []*corev1.Node
 	for _, node := range r.state.existingNodes {
@@ -408,7 +415,7 @@ func (r *Recommender) setupNodePoolSimRun(ctx context.Context, runRef simRunRef)
 		nodeCopy.Name = fromOriginalResourceName(node.Name, runRef.value)
 		nodeCopy.Labels[runRef.key] = runRef.value
 		nodeCopy.Spec.Taints = []corev1.Taint{
-			{Key: runRef.key, Effect: corev1.TaintEffectNoSchedule},
+			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule},
 		}
 		nodeList = append(nodeList, nodeCopy)
 	}
@@ -421,8 +428,11 @@ func (r *Recommender) setupNodePoolSimRun(ctx context.Context, runRef simRunRef)
 		podCopy := pod.DeepCopy()
 		podCopy.Name = fromOriginalResourceName(podCopy.Name, runRef.value)
 		podCopy.Labels[runRef.key] = runRef.value
+		podCopy.ObjectMeta.UID = ""
+		podCopy.ObjectMeta.ResourceVersion = ""
+		podCopy.ObjectMeta.CreationTimestamp = metav1.Time{}
 		podCopy.Spec.Tolerations = []corev1.Toleration{
-			{Key: runRef.key, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
 		}
 		podCopy.Spec.SchedulerName = virtualcluster.BinPackingSchedulerName
 		podCopy.Spec.NodeName = fromOriginalResourceName(pod.Spec.NodeName, runRef.value)
@@ -432,13 +442,29 @@ func (r *Recommender) setupNodePoolSimRun(ctx context.Context, runRef simRunRef)
 		podCopy := pod.DeepCopy()
 		podCopy.Name = fromOriginalResourceName(podCopy.Name, runRef.value)
 		podCopy.Labels[runRef.key] = runRef.value
+		podCopy.ObjectMeta.UID = ""
+		podCopy.ObjectMeta.ResourceVersion = ""
+		podCopy.ObjectMeta.CreationTimestamp = metav1.Time{}
 		podCopy.Spec.Tolerations = []corev1.Toleration{
-			{Key: runRef.key, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
 		}
 		podCopy.Spec.SchedulerName = virtualcluster.BinPackingSchedulerName
 		podList = append(podList, *podCopy)
 	}
 	return r.engine.VirtualClusterAccess().AddPods(ctx, podList...)
+}
+
+func (r *Recommender) sortPods(pods []corev1.Pod) {
+	if r.podOrder == "" {
+		return
+	} else if r.podOrder == "desc" {
+		slices.SortFunc(pods, func(i, j corev1.Pod) int {
+			return -i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
+		})
+	}
+	slices.SortFunc(pods, func(i, j corev1.Pod) int {
+		return i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
+	})
 }
 
 func (r *Recommender) cleanUpNodePoolSimRun(ctx context.Context, runRef simRunRef) error {
@@ -530,6 +556,7 @@ func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, 
 	if err != nil {
 		return err
 	}
+	// TODO(rishabh-11): This is incorrect. We should not delete only those pods with matching nodeName
 	podsToRecreate := make([]corev1.Pod, 0, len(pods))
 	for _, pod := range pods {
 		if pod.Spec.NodeName == nodeName {
@@ -585,5 +612,5 @@ func fromOriginalResourceName(name, suffix string) string {
 }
 
 func toOriginalResourceName(simResName string) string {
-	return strings.Split(simResName, "-SimRun-")[0]
+	return strings.Split(simResName, "-simrun-")[0]
 }

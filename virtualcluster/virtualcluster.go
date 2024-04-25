@@ -338,7 +338,7 @@ func (a *access) ListEvents(ctx context.Context) ([]corev1.Event, error) {
 	return eventList.Items, nil
 }
 
-func (a *access) RemoveTaintFromVirtualNodes(ctx context.Context) error {
+func (a *access) RemoveAllTaintsFromVirtualNodes(ctx context.Context) error {
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList); err != nil {
 		slog.Error("error list nodes", "error", err)
@@ -349,7 +349,7 @@ func (a *access) RemoveTaintFromVirtualNodes(ctx context.Context) error {
 		if _, ok := no.Labels["app.kubernetes.io/existing-node"]; ok {
 			continue
 		}
-		if err := a.RemoveTaintFromVirtualNode(ctx, no.Name); err != nil {
+		if err := a.RemoveAllTaintsFromVirtualNode(ctx, no.Name); err != nil {
 			return err
 		}
 	}
@@ -366,13 +366,47 @@ func (a *access) AddTaintToNode(ctx context.Context, node *corev1.Node) error {
 	return a.client.Update(ctx, adjustedNode)
 }
 
-func (a *access) RemoveTaintFromVirtualNode(ctx context.Context, nodeName string) error {
+func (a *access) RemoveAllTaintsFromVirtualNode(ctx context.Context, nodeName string) error {
 	node := &corev1.Node{}
 	if err := a.client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
 		return err
 	}
 	patch := client.MergeFrom(node.DeepCopy())
 	node.Spec.Taints = nil
+	return a.client.Patch(ctx, node, patch)
+}
+
+func (a *access) RemoveTaintFromVirtualNodes(ctx context.Context, taintKey string) error {
+	nodeList := corev1.NodeList{}
+	if err := a.client.List(ctx, &nodeList); err != nil {
+		slog.Error("error list nodes", "error", err)
+		return err
+	}
+
+	for _, no := range nodeList.Items {
+		if _, ok := no.Labels["app.kubernetes.io/existing-node"]; ok {
+			continue
+		}
+		if err := a.RemoveTaintFromVirtualNode(ctx, no.Name, taintKey); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *access) RemoveTaintFromVirtualNode(ctx context.Context, nodeName, taintKey string) error {
+	node := &corev1.Node{}
+	if err := a.client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		return err
+	}
+	patch := client.MergeFrom(node.DeepCopy())
+	var taints []corev1.Taint
+	for _, taint := range node.Spec.Taints {
+		if taint.Key != taintKey {
+			taints = append(taints, taint)
+		}
+	}
+	node.Spec.Taints = taints
 	return a.client.Patch(ctx, node, patch)
 }
 

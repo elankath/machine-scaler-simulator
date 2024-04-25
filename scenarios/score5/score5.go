@@ -1,11 +1,12 @@
-package score4
+package score5
 
 import (
 	"fmt"
+	"github.com/elankath/scaler-simulator/recommender"
 	"net/http"
+	"time"
 
 	scalesim "github.com/elankath/scaler-simulator"
-	"github.com/elankath/scaler-simulator/nodescorer"
 	"github.com/elankath/scaler-simulator/simutil"
 	"github.com/elankath/scaler-simulator/virtualcluster"
 	"github.com/elankath/scaler-simulator/webutil"
@@ -25,7 +26,6 @@ func New(engine scalesim.Engine) scalesim.Scenario {
 	}
 }
 
-// TODO(rishabh-11): This file is a copy of score4.go and needs to be modified.
 // Scenario C will first scale up nodes in all worker pools of scenario-c shoot to MAX
 // Then deploy Pods small and large according to count.
 // Then wait till all Pods are scheduled or till timeout.
@@ -67,11 +67,11 @@ func (s *scenarioscore5) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	allPods := make([]corev1.Pod, 0, smallCount+largeCount)
 	smallPodLabels := map[string]string{
-		"app.kubernetes.io/name": "score4",
+		"app.kubernetes.io/name": "score5",
 		"foo":                    "bar",
 	}
 	largePodLabels := map[string]string{
-		"app.kubernetes.io/name": "score4",
+		"app.kubernetes.io/name": "score5",
 		"foo":                    "bar2",
 	}
 
@@ -116,22 +116,24 @@ func (s *scenarioscore5) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		allPods = append(allPods, largePods...)
 	}
 
-	recommender := nodescorer.NewRecommender(s.engine, scenarioName, shootName, podOrder, scalesim.StrategyWeights{
+	if err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), podOrder, allPods...); err != nil {
+		webutil.Log(w, "Execution of scenario: "+scenarioName+" completed with error: "+err.Error())
+		return
+	}
+
+	recommender := recommender.NewRecommender(s.engine, scenarioName, shootName, podOrder, recommender.StrategyWeights{
 		LeastWaste: leastWasteWeight,
 		LeastCost:  leastCostWeight,
 	}, w)
 
-	shoot, err := s.engine.ShootAccess(shootName).GetShootObj()
-	if err != nil {
-		webutil.InternalError(w, err)
-		return
-	}
-	recommendation, err := recommender.Run(r.Context(), shoot, allPods)
+	startTime := time.Now()
+	recommendation, err := recommender.Run(r.Context())
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		return
 	}
-	webutil.Log(w, fmt.Sprintf("Recommendation: %s", recommendation.String()))
+	webutil.Log(w, fmt.Sprintf("Execution of scenario: %s completed in %f seconds", scenarioName, time.Since(startTime).Seconds()))
+	webutil.Log(w, fmt.Sprintf("Recommendation: %+v", recommendation))
 	webutil.Log(w, fmt.Sprintf("Scenario-%s Completed!", s.Name()))
 }
 

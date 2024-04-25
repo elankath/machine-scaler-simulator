@@ -370,7 +370,7 @@ func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAcces
 	addedNodes := maps.Values(newNodes)
 
 	if len(addedNodes) > 0 {
-		if err = a.RemoveTaintFromVirtualNode(ctx, addedNodes[0].Name); err != nil {
+		if err = a.RemoveAllTaintsFromVirtualNode(ctx, addedNodes[0].Name); err != nil {
 			return nil, err
 		}
 		return addedNodes[0], nil
