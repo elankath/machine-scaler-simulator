@@ -265,6 +265,19 @@ func (a *access) AddNodes(ctx context.Context, nodes ...*corev1.Node) error {
 	return nil
 }
 
+func (a *access) GetReferenceNode(ctx context.Context, instanceType string) (*corev1.Node, error) {
+	labels := map[string]string{"node.kubernetes.io/instance-type": instanceType, "app.kubernetes.io/existing-node": "true"}
+	nodes, err := a.ListNodesMatchingLabels(ctx, labels)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: scale from zero not handled
+	if len(nodes) == 0 {
+		return nil, fmt.Errorf("no node found for instance type %s", instanceType)
+	}
+	return &nodes[0], nil
+}
+
 func (a *access) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList); err != nil {

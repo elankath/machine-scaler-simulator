@@ -4,10 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/elankath/scaler-simulator/pricing"
+	"github.com/samber/lo"
+	"golang.org/x/exp/rand"
+	"k8s.io/apimachinery/pkg/types"
+	"log/slog"
 	"math"
 	"net/http"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,8 +46,9 @@ import (
                 - compute node score.
 	}
 */
+const resourceNameFormat = "%s-SimRun-%s"
 
-type StrategyWeights struct {
+type strategyWeights struct {
 	LeastWaste float64
 	LeastCost  float64
 }
@@ -53,26 +61,42 @@ type Recommendation struct {
 }
 
 type Recommender struct {
-	engine          scalesim.Engine
-	shootNodes      []corev1.Node
-	scenarioName    string
-	shootName       string
-	strategyWeights StrategyWeights
-	logWriter       http.ResponseWriter
-	state           simulationState
+	engine                 scalesim.Engine
+	shootNodes             []corev1.Node
+	scenarioName           string
+	shootName              string
+	strategyWeights        strategyWeights
+	logWriter              http.ResponseWriter
+	state                  simulationState
+	instanceTypeCostRatios map[string]float64
+}
+
+type nodeScore struct {
+	wasteRatio       float64
+	unscheduledRatio float64
+	costRatio        float64
+	cumulativeScore  float64
 }
 
 type runResult struct {
-	nodePoolName     string
-	zone             string
-	instanceType     string
-	WasteRatio       float64
-	UnscheduledRatio float64
-	CostRatio        float64
-	CumulativeScore  float64
-	unscheduledPods  []corev1.Pod
-	podToNode        map[string]string
-	err              error
+	nodePoolName    string
+	zone            string
+	instanceType    string
+	nodeScore       nodeScore
+	unscheduledPods []corev1.Pod
+	nodeToPods      map[string][]types.NamespacedName
+	err             error
+}
+
+type simRunRef struct {
+	key   string
+	value string
+}
+
+func (s simRunRef) asMap() map[string]string {
+	return map[string]string{
+		s.key: s.value,
+	}
 }
 
 type simulationState struct {
@@ -111,14 +135,15 @@ func (s *simulationState) updateEligibleNodePools(recommendation Recommendation)
 	}
 }
 
-func NewRecommender(engine scalesim.Engine, shootNodes []corev1.Node, scenarioName, shootName string, strategyWeights StrategyWeights, logWriter http.ResponseWriter) *Recommender {
+func NewRecommender(engine scalesim.Engine, shootNodes []corev1.Node, scenarioName, shootName string, strategyWeights strategyWeights, logWriter http.ResponseWriter) *Recommender {
 	return &Recommender{
-		engine:          engine,
-		shootNodes:      shootNodes,
-		scenarioName:    scenarioName,
-		shootName:       shootName,
-		strategyWeights: strategyWeights,
-		logWriter:       logWriter,
+		engine:                 engine,
+		shootNodes:             shootNodes,
+		scenarioName:           scenarioName,
+		shootName:              shootName,
+		strategyWeights:        strategyWeights,
+		logWriter:              logWriter,
+		instanceTypeCostRatios: make(map[string]float64),
 	}
 }
 
@@ -126,7 +151,6 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 	var (
 		recommendations []Recommendation
 		runNumber       int
-		recommendation  *Recommendation
 	)
 
 	shoot, err := r.getShoot()
@@ -135,6 +159,7 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 		return recommendations, err
 	}
 
+	r.computeCostRatiosForInstanceTypes(shoot.Spec.Provider.Workers)
 	if err = r.initializeSimulationState(ctx, shoot); err != nil {
 		webutil.InternalError(r.logWriter, err)
 		return recommendations, err
@@ -148,7 +173,7 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 			break
 		}
 
-		recommendation, err = r.runSimulation(ctx, runNumber)
+		recommendation, winnerRunResult, err := r.runSimulation(ctx, runNumber)
 		if err != nil {
 			webutil.Log(r.logWriter, fmt.Sprintf("Unable to get eligible node pools for shoot %s, err: %v", shoot.Name, err))
 			break
@@ -156,6 +181,9 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 		if recommendation == nil {
 			webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d, no winner could be identified. This will happen when no pods could be assgined. No more runs are required, exiting early", runNumber))
 			break
+		}
+		if err := r.syncWinningResult(ctx, winnerRunResult); err != nil {
+			return nil, err
 		}
 		webutil.Log(r.logWriter, fmt.Sprintf("For scale-up recommender run #%d, winning score is: %v", runNumber, recommendation))
 		recommendations = append(recommendations, *recommendation)
@@ -186,7 +214,7 @@ func (r *Recommender) getShoot() (*v1beta1.Shoot, error) {
 // 1 pod will get assigned to A. 5 pending. 3 Nodes will be scale up. (1-a, 1-b, 1-c)
 // if you count existing nodes and pods, then only 2 nodes are needed.
 
-func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommendation, error) {
+func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommendation, *runResult, error) {
 	/*
 		    1. initializeEligibleNodePools
 			2. For each nodePool, start a go routine. Each go routine will return a node score.
@@ -219,13 +247,36 @@ func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommend
 		}
 	}
 	if errs != nil {
-		return nil, errs
+		return nil, nil, errs
 	}
-	// TODO: Ensure getWinner picks a winner randomly if scores are equal
-	recommendation, unscheduledPods := getWinner(results)
-	r.state.update(recommendation, unscheduledPods)
-	// create the node and assign the pods using spec.nodeName
-	return &recommendation, nil
+
+	recommendation, winnerRunResult := getWinner(results)
+	r.state.update(recommendation, winnerRunResult.unscheduledPods)
+	return &recommendation, &winnerRunResult, nil
+}
+
+func (r *Recommender) syncWinningResult(ctx context.Context, winningRunResult *runResult) error {
+	node, err := r.constructNodeFromExistingNodeOfInstanceType(ctx, winningRunResult.instanceType, winningRunResult.nodePoolName, winningRunResult.zone, false, nil)
+	if err != nil {
+		return err
+	}
+	if err = r.engine.VirtualClusterAccess().AddNodes(ctx, node); err != nil {
+		return err
+	}
+	var podsToUpdate []corev1.Pod
+	for nodeName, simPodObjectKeys := range winningRunResult.nodeToPods {
+		for _, simPodObjectKey := range simPodObjectKeys {
+			podName := toOriginalResourceName(simPodObjectKey.Name)
+			pod, err := r.engine.VirtualClusterAccess().GetPod(ctx, types.NamespacedName{Name: podName, Namespace: simPodObjectKey.Namespace})
+			if err != nil {
+				return err
+			}
+			podCopy := pod.DeepCopy()
+			podCopy.Spec.NodeName = nodeName
+			podsToUpdate = append(podsToUpdate, *podCopy)
+		}
+	}
+	return r.engine.VirtualClusterAccess().UpdatePods(ctx, podsToUpdate...)
 }
 
 func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, resultCh chan runResult, runNum int) {
@@ -241,9 +292,11 @@ func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, resultCh c
 func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.WaitGroup, nodePool scalesim.NodePool, resultCh chan runResult, runNum int) {
 	defer wg.Done()
 
-	simRunKey := "app.kubernetes.io/simulation-run"
-	simRunValue := nodePool.Name + "-" + strconv.Itoa(runNum)
-	if err := r.setupNodePoolSimRun(ctx, simRunKey, simRunValue); err != nil {
+	runRef := simRunRef{
+		key:   "app.kubernetes.io/simulation-run",
+		value: nodePool.Name + "-" + strconv.Itoa(runNum),
+	}
+	if err := r.setupNodePoolSimRun(ctx, runRef); err != nil {
 		resultCh <- createErrorResult(err)
 		return
 	}
@@ -253,12 +306,12 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 	)
 	for _, zone := range nodePool.Zones {
 		if node != nil {
-			if err = r.resetNodePoolSimRun(ctx, node.Name, simRunKey, simRunValue); err != nil {
+			if err = r.resetNodePoolSimRun(ctx, node.Name, runRef); err != nil {
 				resultCh <- createErrorResult(err)
 				return
 			}
 		}
-		node, err = r.constructNodeFromExistingNodeOfInstanceType(ctx, nodePool.MachineType, zone, simRunKey, simRunValue)
+		node, err = r.constructNodeFromExistingNodeOfInstanceType(ctx, nodePool.MachineType, nodePool.Name, zone, true, &runRef)
 		if err != nil {
 			resultCh <- createErrorResult(err)
 			return
@@ -273,36 +326,60 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 			resultCh <- createErrorResult(err)
 			return
 		}
-		result := r.computeNodeScore()
-		resultCh <- result
+		ns := r.computeNodeScore(node)
+		resultCh <- r.computeRunResult(ctx, nodePool.Name, nodePool.MachineType, node.Name, zone, runRef, ns)
 	}
-	if err = r.cleanUpNodePoolSimRun(ctx, simRunKey, simRunValue); err != nil {
+	if err = r.cleanUpNodePoolSimRun(ctx, runRef); err != nil {
 		// In the productive code, there will not be any real KAPI and ETCD. Fake API server will never return an error as everything will be in memory.
 		// For now, we are only logging this error as in the POC code since the caller of recommender will re-initialize the virtual cluster.
-		webutil.Log(r.logWriter, "Error cleaning up simulation run: "+simRunValue+" err: "+err.Error())
+		webutil.Log(r.logWriter, "Error cleaning up simulation run: "+runRef.value+" err: "+err.Error())
 	}
 }
 
-func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Context, instanceType, zone, labelKey, labelValue string) (*corev1.Node, error) {
-	labels := map[string]string{"node.kubernetes.io/instance-type": instanceType, "app.kubernetes.io/existing-node": "true"}
-	nodes, err := r.engine.VirtualClusterAccess().ListNodesMatchingLabels(ctx, labels)
+func (r *Recommender) computeRunResult(ctx context.Context, nodePoolName, instanceType, nodeName, zone string, runRef simRunRef, score nodeScore) runResult {
+	pods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, runRef.asMap())
+	if err != nil {
+		return runResult{err: err}
+	}
+	unscheduledPods := make([]corev1.Pod, 0, len(pods))
+	nodeToPods := make(map[string][]types.NamespacedName)
+	for _, pod := range pods {
+		if pod.Spec.NodeName == "" {
+			unscheduledPods = append(unscheduledPods, pod)
+		} else {
+			nodeToPods[pod.Spec.NodeName] = append(nodeToPods[pod.Spec.NodeName], client.ObjectKeyFromObject(&pod))
+		}
+	}
+	return runResult{
+		nodePoolName:    nodePoolName,
+		zone:            zone,
+		instanceType:    instanceType,
+		nodeScore:       score,
+		unscheduledPods: unscheduledPods,
+		nodeToPods:      nodeToPods,
+	}
+}
+
+func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Context, instanceType, poolName, zone string, forSimRun bool, runRef *simRunRef) (*corev1.Node, error) {
+	referenceNode, err := r.engine.VirtualClusterAccess().GetReferenceNode(ctx, instanceType)
 	if err != nil {
 		return nil, err
 	}
-	// TODO: scale from zero not handled
-	if len(nodes) == 0 {
-		return nil, fmt.Errorf("no node found in shoot %s for instance type %s", r.shootName, instanceType)
-	}
-
-	referenceNode := nodes[0]
 	nodeNamePrefix, err := simutil.GenerateRandomString(4)
 	if err != nil {
 		return nil, err
 	}
-	nodeName := nodeNamePrefix + "-SimRun-" + labelValue
 	nodeLabels := referenceNode.Labels
 	nodeLabels["topology.kubernetes.io/zone"] = zone
-	nodeLabels[labelKey] = labelValue
+	var nodeName string
+	taints := make([]corev1.Taint, 0, 1)
+	if forSimRun {
+		nodeName = nodeNamePrefix + "-SimRun-" + runRef.value
+		nodeLabels[runRef.key] = runRef.value
+		taints = append(taints, corev1.Taint{Key: runRef.key, Effect: corev1.TaintEffectNoSchedule})
+	} else {
+		nodeName = nodeNamePrefix + "-" + poolName
+	}
 	nodeLabels["kubernetes.io/hostname"] = nodeName
 	delete(nodeLabels, "app.kubernetes.io/existing-node")
 
@@ -313,9 +390,7 @@ func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Co
 			Labels:    nodeLabels,
 		},
 		Spec: corev1.NodeSpec{
-			Taints: []corev1.Taint{
-				{Key: labelKey, Effect: corev1.TaintEffectNoSchedule},
-			},
+			Taints: taints,
 		},
 		Status: corev1.NodeStatus{
 			Allocatable: referenceNode.Status.Allocatable,
@@ -326,15 +401,14 @@ func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Co
 	return node, nil
 }
 
-func (r *Recommender) setupNodePoolSimRun(ctx context.Context, key, value string) error {
+func (r *Recommender) setupNodePoolSimRun(ctx context.Context, runRef simRunRef) error {
 	var nodeList []*corev1.Node
-	resourceNameFormat := "%s-SimRun-%s"
 	for _, node := range r.state.existingNodes {
 		nodeCopy := node.DeepCopy()
-		nodeCopy.Name = fmt.Sprintf(resourceNameFormat, node.Name, value)
-		nodeCopy.Labels[key] = value
+		nodeCopy.Name = fromOriginalResourceName(node.Name, runRef.value)
+		nodeCopy.Labels[runRef.key] = runRef.value
 		nodeCopy.Spec.Taints = []corev1.Taint{
-			{Key: key, Effect: corev1.TaintEffectNoSchedule},
+			{Key: runRef.key, Effect: corev1.TaintEffectNoSchedule},
 		}
 		nodeList = append(nodeList, nodeCopy)
 	}
@@ -345,21 +419,21 @@ func (r *Recommender) setupNodePoolSimRun(ctx context.Context, key, value string
 	var podList []corev1.Pod
 	for _, pod := range r.state.scheduledPods {
 		podCopy := pod.DeepCopy()
-		podCopy.Name = fmt.Sprintf(resourceNameFormat, podCopy.Name, value)
-		podCopy.Labels[key] = value
+		podCopy.Name = fromOriginalResourceName(podCopy.Name, runRef.value)
+		podCopy.Labels[runRef.key] = runRef.value
 		podCopy.Spec.Tolerations = []corev1.Toleration{
-			{Key: key, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+			{Key: runRef.key, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
 		}
 		podCopy.Spec.SchedulerName = virtualcluster.BinPackingSchedulerName
-		podCopy.Spec.NodeName = fmt.Sprintf(resourceNameFormat, pod.Spec.NodeName, value)
+		podCopy.Spec.NodeName = fromOriginalResourceName(pod.Spec.NodeName, runRef.value)
 		podList = append(podList, *podCopy)
 	}
 	for _, pod := range r.state.unscheduledPods {
 		podCopy := pod.DeepCopy()
-		podCopy.Name = fmt.Sprintf(resourceNameFormat, podCopy.Name, value)
-		podCopy.Labels[key] = value
+		podCopy.Name = fromOriginalResourceName(podCopy.Name, runRef.value)
+		podCopy.Labels[runRef.key] = runRef.value
 		podCopy.Spec.Tolerations = []corev1.Toleration{
-			{Key: key, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+			{Key: runRef.key, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
 		}
 		podCopy.Spec.SchedulerName = virtualcluster.BinPackingSchedulerName
 		podList = append(podList, *podCopy)
@@ -367,8 +441,8 @@ func (r *Recommender) setupNodePoolSimRun(ctx context.Context, key, value string
 	return r.engine.VirtualClusterAccess().AddPods(ctx, podList...)
 }
 
-func (r *Recommender) cleanUpNodePoolSimRun(ctx context.Context, labelKey, labelValue string) error {
-	labels := map[string]string{labelKey: labelValue}
+func (r *Recommender) cleanUpNodePoolSimRun(ctx context.Context, runRef simRunRef) error {
+	labels := runRef.asMap()
 	err := r.engine.VirtualClusterAccess().DeletePodsWithMatchingLabels(ctx, labels)
 	err = r.engine.VirtualClusterAccess().DeleteNodesWithMatchingLabels(ctx, labels)
 	return err
@@ -397,21 +471,30 @@ func (r *Recommender) initializeEligibleNodePools(ctx context.Context, shoot *v1
 	return nil
 }
 
-func getWinner(results []runResult) (Recommendation, []corev1.Pod) {
+func getWinner(results []runResult) (Recommendation, runResult) {
 	var winner runResult
 	minScore := math.MaxFloat64
+	var winningRunResults []runResult
 	for _, v := range results {
-		if v.CumulativeScore < minScore {
+		if v.nodeScore.cumulativeScore < minScore {
 			winner = v
-			minScore = v.CumulativeScore
+			minScore = v.nodeScore.cumulativeScore
 		}
 	}
+	for _, v := range results {
+		if v.nodeScore.cumulativeScore == minScore {
+			winningRunResults = append(winningRunResults, v)
+		}
+	}
+	rand.Seed(uint64(time.Now().UnixNano()))
+	winningIndex := rand.Intn(len(winningRunResults))
+	winner = winningRunResults[winningIndex]
 	return Recommendation{
 		zone:         winner.zone,
 		nodePoolName: winner.nodePoolName,
 		incrementBy:  int32(1),
 		instanceType: winner.instanceType,
-	}, winner.unscheduledPods
+	}, winner
 }
 
 func createErrorResult(err error) runResult {
@@ -424,17 +507,26 @@ func (r *Recommender) logError(err error) {
 	webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
 }
 
-func (r *Recommender) computeNodeScore() runResult {
-	return runResult{}
+func (r *Recommender) computeNodeScore(scaledNode *corev1.Node) nodeScore {
+	costRatio := r.strategyWeights.LeastCost * r.instanceTypeCostRatios[scaledNode.Labels["node.kubernetes.io/instance-type"]]
+	wasteRatio := r.strategyWeights.LeastWaste * computeWasteRatio(scaledNode, r.state.unscheduledPods)
+	unscheduledRatio := computeUnscheduledRatio(r.state.unscheduledPods)
+	cumulativeScore := wasteRatio + unscheduledRatio*costRatio
+	return nodeScore{
+		wasteRatio:       wasteRatio,
+		unscheduledRatio: unscheduledRatio,
+		costRatio:        costRatio,
+		cumulativeScore:  cumulativeScore,
+	}
 }
 
-func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, simRunLabelKey, simRunLabelValue string) error {
+func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, runRef simRunRef) error {
 	// remove the node with the nodeName
 	if err := r.engine.VirtualClusterAccess().DeleteNode(ctx, nodeName); err != nil {
 		return err
 	}
 	// remove the pods with nodeName
-	pods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, map[string]string{simRunLabelKey: simRunLabelValue})
+	pods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, runRef.asMap())
 	if err != nil {
 		return err
 	}
@@ -448,4 +540,50 @@ func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, 
 		return err
 	}
 	return r.engine.VirtualClusterAccess().CreatePodsWithNodeAndScheduler(ctx, virtualcluster.BinPackingSchedulerName, "", podsToRecreate...)
+}
+
+func (r *Recommender) computeCostRatiosForInstanceTypes(workerPools []v1beta1.Worker) {
+	totalCost := lo.Reduce[v1beta1.Worker, float64](workerPools, func(totalCost float64, pool v1beta1.Worker, _ int) float64 {
+		return totalCost + pricing.GetPricing(pool.Machine.Type)
+	}, 0.0)
+	for _, pool := range workerPools {
+		price := pricing.GetPricing(pool.Machine.Type)
+		r.instanceTypeCostRatios[pool.Machine.Type] = price / totalCost
+	}
+}
+
+func computeUnscheduledRatio(candidatePods []corev1.Pod) float64 {
+	var totalAssignedPods int
+	for _, pod := range candidatePods {
+		if pod.Spec.NodeName != "" {
+			totalAssignedPods++
+		}
+	}
+	return float64(len(candidatePods)-totalAssignedPods) / float64(len(candidatePods))
+}
+
+func computeWasteRatio(node *corev1.Node, candidatePods []corev1.Pod) float64 {
+	var (
+		targetNodeAssignedPods []corev1.Pod
+		totalMemoryConsumed    int64
+	)
+	for _, pod := range candidatePods {
+		if pod.Spec.NodeName == node.Name {
+			targetNodeAssignedPods = append(targetNodeAssignedPods, pod)
+			for _, container := range pod.Spec.Containers {
+				totalMemoryConsumed += container.Resources.Requests.Memory().MilliValue()
+			}
+			slog.Info("NodPodAssignment: ", "pod", pod.Name, "node", pod.Spec.NodeName, "memory", pod.Spec.Containers[0].Resources.Requests.Memory().MilliValue())
+		}
+	}
+	totalMemoryCapacity := node.Status.Capacity.Memory().MilliValue()
+	return float64(totalMemoryCapacity-totalMemoryConsumed) / float64(totalMemoryCapacity)
+}
+
+func fromOriginalResourceName(name, suffix string) string {
+	return fmt.Sprintf(resourceNameFormat, name, suffix)
+}
+
+func toOriginalResourceName(simResName string) string {
+	return strings.Split(simResName, "-SimRun-")[0]
 }

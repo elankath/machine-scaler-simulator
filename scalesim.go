@@ -103,6 +103,8 @@ type VirtualClusterAccess interface {
 	ListNodesMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Node, error)
 
 	ListPodsMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Pod, error)
+
+	GetReferenceNode(ctx context.Context, instanceType string) (*corev1.Node, error)
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster
