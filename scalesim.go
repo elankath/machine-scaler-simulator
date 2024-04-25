@@ -4,13 +4,14 @@ package scalesim
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	machinev1alpha1 "github.com/gardener/machine-controller-manager/pkg/apis/machine/v1alpha1"
 
@@ -55,7 +56,7 @@ type VirtualClusterAccess interface {
 	// AddPods adds pods in the virtual cluster
 	AddPods(context.Context, ...corev1.Pod) error
 
-	CreatePodsWithNodeAndScheduler(context.Context, string, string, ...corev1.Pod) error
+	CreatePodsWithNodeAndScheduler(ctx context.Context, schedulerName string, nodeName string, pods ...corev1.Pod) error
 
 	// CreatePodsFromYaml loads the pod yaml at the given podYamlPath and creates Pods for given number of replicas.
 	CreatePodsFromYaml(ctx context.Context, podYamlPath string, replicas int) error
@@ -100,6 +101,8 @@ type VirtualClusterAccess interface {
 	DeletePodsWithMatchingLabels(ctx context.Context, labels map[string]string) error
 
 	ListNodesMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Node, error)
+
+	ListPodsMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Pod, error)
 }
 
 // ShootAccess is a facade to the real-world shoot data and real shoot cluster

@@ -283,6 +283,15 @@ func (a *access) ListNodesMatchingLabels(ctx context.Context, labels map[string]
 	return nodeList.Items, nil
 }
 
+func (a *access) ListPodsMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Pod, error) {
+	podList := corev1.PodList{}
+	if err := a.client.List(ctx, &podList, client.MatchingLabels(labels)); err != nil {
+		slog.Error("cannot list pods with matching labels", "labels", labels, "error", err)
+		return nil, err
+	}
+	return podList.Items, nil
+}
+
 func (a *access) ListNodesInNodePool(ctx context.Context, nodePoolName string) ([]corev1.Node, error) {
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList, client.MatchingLabels{"worker.gardener.cloud/pool": nodePoolName}); err != nil {

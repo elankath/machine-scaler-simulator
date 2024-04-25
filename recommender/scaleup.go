@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/elankath/scaler-simulator/simutil"
 	"github.com/elankath/scaler-simulator/virtualcluster"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -51,21 +52,6 @@ type Recommendation struct {
 	instanceType string
 }
 
-type nodePools map[string]scalesim.NodePool
-
-func (n nodePools) update(recommendation Recommendation) {
-	np, ok := n[recommendation.nodePoolName]
-	if !ok {
-		return
-	}
-	np.Current += recommendation.incrementBy
-	if np.Current == np.Max {
-		delete(n, recommendation.nodePoolName)
-	} else {
-		n[recommendation.nodePoolName] = np
-	}
-}
-
 type Recommender struct {
 	engine          scalesim.Engine
 	shootNodes      []corev1.Node
@@ -93,9 +79,11 @@ type simulationState struct {
 	existingNodes   []corev1.Node
 	unscheduledPods []corev1.Pod
 	scheduledPods   []corev1.Pod
+	// eligibleNodePools holds the available node capacity per node pool.
+	eligibleNodePools map[string]scalesim.NodePool
 }
 
-func (s simulationState) update(revisedUnscheduledPods []corev1.Pod) {
+func (s *simulationState) update(recommendation Recommendation, revisedUnscheduledPods []corev1.Pod) {
 	for _, up := range s.unscheduledPods {
 		isPodScheduled := !slices.ContainsFunc(revisedUnscheduledPods, func(pod corev1.Pod) bool {
 			return pod.Name == up.Name
@@ -106,6 +94,20 @@ func (s simulationState) update(revisedUnscheduledPods []corev1.Pod) {
 				return pod.Name == up.Name
 			})
 		}
+	}
+	s.updateEligibleNodePools(recommendation)
+}
+
+func (s *simulationState) updateEligibleNodePools(recommendation Recommendation) {
+	np, ok := s.eligibleNodePools[recommendation.nodePoolName]
+	if !ok {
+		return
+	}
+	np.Current += recommendation.incrementBy
+	if np.Current == np.Max {
+		delete(s.eligibleNodePools, recommendation.nodePoolName)
+	} else {
+		s.eligibleNodePools[recommendation.nodePoolName] = np
 	}
 }
 
@@ -121,23 +123,23 @@ func NewRecommender(engine scalesim.Engine, shootNodes []corev1.Node, scenarioNa
 }
 
 func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
-	var recommendations []Recommendation
-	err := r.initializeSimulationState(ctx)
-	if err != nil {
-		return recommendations, err
-	}
-	var runNumber int
+	var (
+		recommendations []Recommendation
+		runNumber       int
+		recommendation  *Recommendation
+	)
+
 	shoot, err := r.getShoot()
 	if err != nil {
 		webutil.InternalError(r.logWriter, err)
 		return recommendations, err
 	}
-	var recommendation *Recommendation
-	nps, err := r.getEligibleNodePools(ctx, shoot)
-	if err != nil {
+
+	if err = r.initializeSimulationState(ctx, shoot); err != nil {
 		webutil.InternalError(r.logWriter, err)
 		return recommendations, err
 	}
+
 	for {
 		runNumber++
 		webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d started...", runNumber))
@@ -146,7 +148,7 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 			break
 		}
 
-		recommendation, err = r.runSimulation(ctx, nps, runNumber)
+		recommendation, err = r.runSimulation(ctx, runNumber)
 		if err != nil {
 			webutil.Log(r.logWriter, fmt.Sprintf("Unable to get eligible node pools for shoot %s, err: %v", shoot.Name, err))
 			break
@@ -156,19 +158,18 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 			break
 		}
 		webutil.Log(r.logWriter, fmt.Sprintf("For scale-up recommender run #%d, winning score is: %v", runNumber, recommendation))
-		nps.update(*recommendation)
 		recommendations = append(recommendations, *recommendation)
 	}
 	return recommendations, nil
 }
 
-func (r *Recommender) initializeSimulationState(ctx context.Context) error {
+func (r *Recommender) initializeSimulationState(ctx context.Context, shoot *v1beta1.Shoot) error {
 	unscheduledPods, err := r.engine.VirtualClusterAccess().ListPods(ctx)
 	if err != nil {
 		return err
 	}
 	r.state.unscheduledPods = unscheduledPods
-	return nil
+	return r.initializeEligibleNodePools(ctx, shoot)
 }
 
 func (r *Recommender) getShoot() (*v1beta1.Shoot, error) {
@@ -185,9 +186,9 @@ func (r *Recommender) getShoot() (*v1beta1.Shoot, error) {
 // 1 pod will get assigned to A. 5 pending. 3 Nodes will be scale up. (1-a, 1-b, 1-c)
 // if you count existing nodes and pods, then only 2 nodes are needed.
 
-func (r *Recommender) runSimulation(ctx context.Context, eligibleNodePools nodePools, runNum int) (*Recommendation, error) {
+func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommendation, error) {
 	/*
-		    1. getEligibleNodePools
+		    1. initializeEligibleNodePools
 			2. For each nodePool, start a go routine. Each go routine will return a node score.
 			3. Collect the scores and return
 
@@ -205,8 +206,8 @@ func (r *Recommender) runSimulation(ctx context.Context, eligibleNodePools nodeP
 	*/
 
 	var results []runResult
-	resultCh := make(chan runResult, len(eligibleNodePools))
-	go r.triggerNodePoolSimulations(ctx, eligibleNodePools, resultCh, runNum)
+	resultCh := make(chan runResult, len(r.state.eligibleNodePools))
+	go r.triggerNodePoolSimulations(ctx, resultCh, runNum)
 
 	// label, taint, result chan, error chan, close chan
 	var errs error
@@ -222,14 +223,14 @@ func (r *Recommender) runSimulation(ctx context.Context, eligibleNodePools nodeP
 	}
 	// TODO: Ensure getWinner picks a winner randomly if scores are equal
 	recommendation, unscheduledPods := getWinner(results)
-	r.state.update(unscheduledPods)
+	r.state.update(recommendation, unscheduledPods)
 	// create the node and assign the pods using spec.nodeName
 	return &recommendation, nil
 }
 
-func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, nps nodePools, resultCh chan runResult, runNum int) {
+func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, resultCh chan runResult, runNum int) {
 	wg := &sync.WaitGroup{}
-	for _, nodePool := range nps {
+	for _, nodePool := range r.state.eligibleNodePools {
 		wg.Add(len(nodePool.Zones))
 		go r.runSimulationForNodePool(ctx, wg, nodePool, resultCh, runNum)
 	}
@@ -240,14 +241,24 @@ func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, nps nodePo
 func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.WaitGroup, nodePool scalesim.NodePool, resultCh chan runResult, runNum int) {
 	defer wg.Done()
 
-	labelKey := "app.kubernetes.io/simulation-run"
-	labelValue := nodePool.Name + "-" + strconv.Itoa(runNum)
-	if err := r.setupNodePoolSimRun(ctx, labelKey, labelValue); err != nil {
+	simRunKey := "app.kubernetes.io/simulation-run"
+	simRunValue := nodePool.Name + "-" + strconv.Itoa(runNum)
+	if err := r.setupNodePoolSimRun(ctx, simRunKey, simRunValue); err != nil {
 		resultCh <- createErrorResult(err)
 		return
 	}
+	var (
+		node *corev1.Node
+		err  error
+	)
 	for _, zone := range nodePool.Zones {
-		node, err := r.constructNodeFromExistingNodeOfInstanceType(ctx, nodePool.MachineType, zone, labelKey, labelValue)
+		if node != nil {
+			if err = r.resetNodePoolSimRun(ctx, node.Name, simRunKey, simRunValue); err != nil {
+				resultCh <- createErrorResult(err)
+				return
+			}
+		}
+		node, err = r.constructNodeFromExistingNodeOfInstanceType(ctx, nodePool.MachineType, zone, simRunKey, simRunValue)
 		if err != nil {
 			resultCh <- createErrorResult(err)
 			return
@@ -256,19 +267,24 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 			resultCh <- createErrorResult(err)
 			return
 		}
-		waitTillSchedulingComplete()
+		// in production code FAKE KAPI will not return any error. This is only for POC code where an envtest KAPI is used.
+		_, _, err = simutil.WaitForAndRecordPodSchedulingEvents(ctx, r.engine.VirtualClusterAccess(), r.logWriter, time.Now(), r.state.unscheduledPods, 10*time.Second)
+		if err != nil {
+			resultCh <- createErrorResult(err)
+			return
+		}
 		result := r.computeNodeScore()
 		resultCh <- result
-		r.resetNodePoolSimRun()
 	}
-	err := r.cleanUpNodePoolSimRun(ctx, labelKey, labelValue)
-	if err != nil {
-		resultCh <- createErrorResult(err)
+	if err = r.cleanUpNodePoolSimRun(ctx, simRunKey, simRunValue); err != nil {
+		// In the productive code, there will not be any real KAPI and ETCD. Fake API server will never return an error as everything will be in memory.
+		// For now, we are only logging this error as in the POC code since the caller of recommender will re-initialize the virtual cluster.
+		webutil.Log(r.logWriter, "Error cleaning up simulation run: "+simRunValue+" err: "+err.Error())
 	}
 }
 
 func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Context, instanceType, zone, labelKey, labelValue string) (*corev1.Node, error) {
-	labels := map[string]string{"node.kubernetes.io/instance-type": instanceType}
+	labels := map[string]string{"node.kubernetes.io/instance-type": instanceType, "app.kubernetes.io/existing-node": "true"}
 	nodes, err := r.engine.VirtualClusterAccess().ListNodesMatchingLabels(ctx, labels)
 	if err != nil {
 		return nil, err
@@ -279,20 +295,22 @@ func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Co
 	}
 
 	referenceNode := nodes[0]
-	nodeName := string(referenceNode.UID) + "SimRun-" + labelValue
+	nodeNamePrefix, err := simutil.GenerateRandomString(4)
+	if err != nil {
+		return nil, err
+	}
+	nodeName := nodeNamePrefix + "-SimRun-" + labelValue
 	nodeLabels := referenceNode.Labels
 	nodeLabels["topology.kubernetes.io/zone"] = zone
 	nodeLabels[labelKey] = labelValue
 	nodeLabels["kubernetes.io/hostname"] = nodeName
-
 	delete(nodeLabels, "app.kubernetes.io/existing-node")
 
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      nodeName,
 			Namespace: "default",
-			//TODO Change k8s hostname nodeLabels
-			Labels: referenceNode.Labels,
+			Labels:    nodeLabels,
 		},
 		Spec: corev1.NodeSpec{
 			Taints: []corev1.Taint{
@@ -356,12 +374,12 @@ func (r *Recommender) cleanUpNodePoolSimRun(ctx context.Context, labelKey, label
 	return err
 }
 
-func (r *Recommender) getEligibleNodePools(ctx context.Context, shoot *v1beta1.Shoot) (nodePools, error) {
-	eligibleNodePools := make(nodePools, len(shoot.Spec.Provider.Workers))
+func (r *Recommender) initializeEligibleNodePools(ctx context.Context, shoot *v1beta1.Shoot) error {
+	eligibleNodePools := make(map[string]scalesim.NodePool, len(shoot.Spec.Provider.Workers))
 	for _, worker := range shoot.Spec.Provider.Workers {
 		nodes, err := r.engine.VirtualClusterAccess().ListNodesInNodePool(ctx, worker.Name)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		if int32(len(nodes)) >= worker.Maximum {
 			continue
@@ -375,7 +393,8 @@ func (r *Recommender) getEligibleNodePools(ctx context.Context, shoot *v1beta1.S
 		}
 		eligibleNodePools[worker.Name] = nodePool
 	}
-	return eligibleNodePools, nil
+	r.state.eligibleNodePools = eligibleNodePools
+	return nil
 }
 
 func getWinner(results []runResult) (Recommendation, []corev1.Pod) {
@@ -395,10 +414,6 @@ func getWinner(results []runResult) (Recommendation, []corev1.Pod) {
 	}, winner.unscheduledPods
 }
 
-func waitTillSchedulingComplete() {
-	time.Sleep(5 * time.Second)
-}
-
 func createErrorResult(err error) runResult {
 	return runResult{
 		err: err,
@@ -413,6 +428,24 @@ func (r *Recommender) computeNodeScore() runResult {
 	return runResult{}
 }
 
-func (r *Recommender) resetNodePoolSimRun() {
-	return
+func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, simRunLabelKey, simRunLabelValue string) error {
+	// remove the node with the nodeName
+	if err := r.engine.VirtualClusterAccess().DeleteNode(ctx, nodeName); err != nil {
+		return err
+	}
+	// remove the pods with nodeName
+	pods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, map[string]string{simRunLabelKey: simRunLabelValue})
+	if err != nil {
+		return err
+	}
+	podsToRecreate := make([]corev1.Pod, 0, len(pods))
+	for _, pod := range pods {
+		if pod.Spec.NodeName == nodeName {
+			podsToRecreate = append(podsToRecreate, pod)
+		}
+	}
+	if err := r.engine.VirtualClusterAccess().DeletePods(ctx, podsToRecreate...); err != nil {
+		return err
+	}
+	return r.engine.VirtualClusterAccess().CreatePodsWithNodeAndScheduler(ctx, virtualcluster.BinPackingSchedulerName, "", podsToRecreate...)
 }

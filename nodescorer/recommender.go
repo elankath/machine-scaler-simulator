@@ -3,10 +3,11 @@ package nodescorer
 import (
 	"context"
 	"fmt"
-	"github.com/elankath/scaler-simulator/pricing"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"net/http"
 	"time"
+
+	"github.com/elankath/scaler-simulator/pricing"
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
 

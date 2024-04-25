@@ -7,11 +7,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"k8s.io/apimachinery/pkg/api/resource"
 	"log/slog"
 	"net/http"
 	"slices"
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 
 	"github.com/elankath/scaler-simulator/pricing"
 	"github.com/samber/lo"
@@ -125,7 +126,6 @@ loop:
 			if err != nil {
 				slog.Error("cannot get pod scheduling events, this will be retried", "error", err)
 			}
-			//webutil.Log(w, fmt.Sprintf("Received %d events", len(events)))
 			for _, event := range events {
 				switch event.Reason {
 				case "FailedScheduling":
