@@ -313,7 +313,7 @@ func (r *Recommender) syncRecommenderStateWithWinningResult(ctx context.Context,
 	}
 	for _, pod := range scheduledPods {
 		r.state.scheduledPods = append(r.state.scheduledPods, pod)
-		slices.DeleteFunc(r.state.unscheduledPods, func(p corev1.Pod) bool {
+		r.state.unscheduledPods = slices.DeleteFunc(r.state.unscheduledPods, func(p corev1.Pod) bool {
 			return p.Name == pod.Name
 		})
 	}
