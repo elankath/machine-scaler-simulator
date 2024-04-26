@@ -191,6 +191,8 @@ func InitializeAccess(scheme *runtime.Scheme, binaryAssetsDir string, apiServerF
 	}
 
 	cfg, err := env.Start()
+	cfg.QPS = 100
+	cfg.Burst = 100
 	if err != nil {
 		return nil, err
 	}

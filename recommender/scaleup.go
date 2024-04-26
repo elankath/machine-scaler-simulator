@@ -512,7 +512,7 @@ func (r *Recommender) computeRunResult(ctx context.Context, nodePoolName, instan
 func (r *Recommender) computeNodeScore(scaledNode *corev1.Node, candidatePods []corev1.Pod) nodeScore {
 	costRatio := r.strategyWeights.LeastCost * r.instanceTypeCostRatios[scaledNode.Labels["node.kubernetes.io/instance-type"]]
 	wasteRatio := r.strategyWeights.LeastWaste * computeWasteRatio(scaledNode, candidatePods)
-	unscheduledRatio := computeUnscheduledRatio(r.state.unscheduledPods)
+	unscheduledRatio := computeUnscheduledRatio(candidatePods)
 	cumulativeScore := wasteRatio + unscheduledRatio*costRatio
 	return nodeScore{
 		wasteRatio:       wasteRatio,
@@ -521,19 +521,6 @@ func (r *Recommender) computeNodeScore(scaledNode *corev1.Node, candidatePods []
 		cumulativeScore:  cumulativeScore,
 	}
 }
-
-//func (r *Recommender) sortPods(pods []corev1.Pod) {
-//	if r.podOrder == "" {
-//		return
-//	} else if r.podOrder == "desc" {
-//		slices.SortFunc(pods, func(i, j corev1.Pod) int {
-//			return -i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
-//		})
-//	}
-//	slices.SortFunc(pods, func(i, j corev1.Pod) int {
-//		return i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
-//	})
-//}
 
 func (r *Recommender) cleanUpNodePoolSimRun(ctx context.Context, runRef simRunRef) error {
 	labels := runRef.asMap()
