@@ -53,7 +53,7 @@ func (a *access) DeletePods(ctx context.Context, pods ...corev1.Pod) error {
 }
 
 func (a *access) DeletePodsWithMatchingLabels(ctx context.Context, labels map[string]string) error {
-	return a.client.DeleteAllOf(ctx, &corev1.Pod{}, client.MatchingLabels(labels))
+	return a.client.DeleteAllOf(ctx, &corev1.Pod{}, client.InNamespace("default"), client.MatchingLabels(labels))
 }
 
 func (a *access) UpdatePods(ctx context.Context, pods ...corev1.Pod) error {
@@ -85,7 +85,7 @@ func (a *access) DeleteNode(ctx context.Context, name string) error {
 }
 
 func (a *access) DeleteNodesWithMatchingLabels(ctx context.Context, labels map[string]string) error {
-	return a.client.DeleteAllOf(ctx, &corev1.Node{}, client.MatchingLabels(labels))
+	return a.client.DeleteAllOf(ctx, &corev1.Node{}, client.InNamespace("default"), client.MatchingLabels(labels))
 }
 
 func (a *access) CreatePods(ctx context.Context, podOrder string, pods ...corev1.Pod) error {
@@ -305,6 +305,21 @@ func (a *access) ListPodsMatchingLabels(ctx context.Context, labels map[string]s
 	return podList.Items, nil
 }
 
+func (a *access) ListPodsMatchingPodNames(ctx context.Context, namespace string, podNames []string) ([]corev1.Pod, error) {
+	podList := corev1.PodList{}
+	if err := a.client.List(ctx, &podList, client.InNamespace(namespace)); err != nil {
+		slog.Error("cannot list pods", "namespace", namespace, "error", err)
+		return nil, err
+	}
+	matchingPods := make([]corev1.Pod, 0, len(podNames))
+	for _, pod := range podList.Items {
+		if slices.Contains(podNames, pod.Name) {
+			matchingPods = append(matchingPods, pod)
+		}
+	}
+	return matchingPods, nil
+}
+
 func (a *access) ListNodesInNodePool(ctx context.Context, nodePoolName string) ([]corev1.Node, error) {
 	nodeList := corev1.NodeList{}
 	if err := a.client.List(ctx, &nodeList, client.MatchingLabels{"worker.gardener.cloud/pool": nodePoolName}); err != nil {
@@ -327,6 +342,12 @@ func (a *access) GetPod(ctx context.Context, fullName types.NamespacedName) (*co
 	pod := corev1.Pod{}
 	err := a.client.Get(ctx, fullName, &pod)
 	return &pod, err
+}
+
+func (a *access) GetNode(ctx context.Context, namespaceName types.NamespacedName) (*corev1.Node, error) {
+	node := corev1.Node{}
+	err := a.client.Get(ctx, namespaceName, &node)
+	return &node, err
 }
 
 func (a *access) ListEvents(ctx context.Context) ([]corev1.Event, error) {

@@ -84,6 +84,7 @@ type VirtualClusterAccess interface {
 	Shutdown()
 
 	GetPod(ctx context.Context, fullName types.NamespacedName) (*corev1.Pod, error)
+	GetNode(ctx context.Context, namespaceName types.NamespacedName) (*corev1.Node, error)
 	ListEvents(cts context.Context) ([]corev1.Event, error)
 	ListNodes(ctx context.Context) ([]corev1.Node, error)
 	ListNodesInNodePool(ctx context.Context, nodePoolName string) ([]corev1.Node, error)
@@ -107,6 +108,7 @@ type VirtualClusterAccess interface {
 	ListNodesMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Node, error)
 
 	ListPodsMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Pod, error)
+	ListPodsMatchingPodNames(ctx context.Context, namespace string, podNames []string) ([]corev1.Pod, error)
 
 	GetReferenceNode(ctx context.Context, instanceType string) (*corev1.Node, error)
 }
