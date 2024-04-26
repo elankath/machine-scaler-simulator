@@ -108,21 +108,6 @@ type simulationState struct {
 	eligibleNodePools map[string]scalesim.NodePool
 }
 
-//func (s *simulationState) update(recommendation Recommendation, revisedUnscheduledPods []corev1.Pod) {
-//	for _, up := range s.unscheduledPods {
-//		isPodScheduled := slices.ContainsFunc(revisedUnscheduledPods, func(pod corev1.Pod) bool {
-//			return len(strings.TrimSpace(pod.Spec.NodeName)) > 0
-//		})
-//		if isPodScheduled {
-//			s.scheduledPods = append(s.scheduledPods, up)
-//			slices.DeleteFunc(s.unscheduledPods, func(pod corev1.Pod) bool {
-//				return pod.Name == up.Name
-//			})
-//		}
-//	}
-//	s.updateEligibleNodePools(recommendation)
-//}
-
 func (s *simulationState) updateEligibleNodePools(recommendation *Recommendation) {
 	np, ok := s.eligibleNodePools[recommendation.nodePoolName]
 	if !ok {
@@ -192,6 +177,24 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 	return recommendations, nil
 }
 
+func (r *Recommender) getShoot() (*v1beta1.Shoot, error) {
+	shoot, err := r.engine.ShootAccess(r.shootName).GetShootObj()
+	if err != nil {
+		return nil, err
+	}
+	return shoot, nil
+}
+
+func (r *Recommender) computeCostRatiosForInstanceTypes(workerPools []v1beta1.Worker) {
+	totalCost := lo.Reduce[v1beta1.Worker, float64](workerPools, func(totalCost float64, pool v1beta1.Worker, _ int) float64 {
+		return totalCost + pricing.GetPricing(pool.Machine.Type)
+	}, 0.0)
+	for _, pool := range workerPools {
+		price := pricing.GetPricing(pool.Machine.Type)
+		r.instanceTypeCostRatios[pool.Machine.Type] = price / totalCost
+	}
+}
+
 func (r *Recommender) initializeSimulationState(ctx context.Context, shoot *v1beta1.Shoot) error {
 	unscheduledPods, err := r.engine.VirtualClusterAccess().ListPods(ctx)
 	if err != nil {
@@ -201,12 +204,27 @@ func (r *Recommender) initializeSimulationState(ctx context.Context, shoot *v1be
 	return r.initializeEligibleNodePools(ctx, shoot)
 }
 
-func (r *Recommender) getShoot() (*v1beta1.Shoot, error) {
-	shoot, err := r.engine.ShootAccess(r.shootName).GetShootObj()
-	if err != nil {
-		return nil, err
+func (r *Recommender) initializeEligibleNodePools(ctx context.Context, shoot *v1beta1.Shoot) error {
+	eligibleNodePools := make(map[string]scalesim.NodePool, len(shoot.Spec.Provider.Workers))
+	for _, worker := range shoot.Spec.Provider.Workers {
+		nodes, err := r.engine.VirtualClusterAccess().ListNodesInNodePool(ctx, worker.Name)
+		if err != nil {
+			return err
+		}
+		if int32(len(nodes)) >= worker.Maximum {
+			continue
+		}
+		nodePool := scalesim.NodePool{
+			Name:        worker.Name,
+			Zones:       worker.Zones,
+			Max:         worker.Maximum,
+			Current:     int32(len(nodes)),
+			MachineType: worker.Machine.Type,
+		}
+		eligibleNodePools[worker.Name] = nodePool
 	}
-	return shoot, nil
+	r.state.eligibleNodePools = eligibleNodePools
+	return nil
 }
 
 // TODO: sync existing nodes and pods deployed on them. DO NOT TAINT THESE NODES.
@@ -214,7 +232,6 @@ func (r *Recommender) getShoot() (*v1beta1.Shoot, error) {
 // deployment 6 replicas, tsc zone, minDomains 3
 // 1 pod will get assigned to A. 5 pending. 3 Nodes will be scale up. (1-a, 1-b, 1-c)
 // if you count existing nodes and pods, then only 2 nodes are needed.
-
 func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommendation, *runResult, error) {
 	/*
 		    1. initializeEligibleNodePools
@@ -252,7 +269,6 @@ func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommend
 	}
 
 	recommendation, winnerRunResult := getWinner(results)
-	//r.state.update(recommendation, winnerRunResult.unscheduledPods)
 	return &recommendation, &winnerRunResult, nil
 }
 
@@ -345,15 +361,12 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 		}
 	}()
 
-	if err := r.setupNodePoolSimRun(ctx, runRef); err != nil {
-		resultCh <- createErrorResult(err)
-		return
-	}
 	var (
 		node *corev1.Node
 		err  error
 	)
 	for _, zone := range nodePool.Zones {
+		webutil.Log(r.logWriter, fmt.Sprintf("Starting simulation run: %s for nodePool: %s in zone: %s", runRef.value, nodePool.Name, zone))
 		if node != nil {
 			if err = r.resetNodePoolSimRun(ctx, node.Name, runRef); err != nil {
 				resultCh <- createErrorResult(err)
@@ -373,7 +386,7 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 			return
 		}
 		deployTime := time.Now()
-		unscheduledPods, err := r.CreateAndDeployUnscheduledPods(ctx, runRef)
+		unscheduledPods, err := r.createAndDeployUnscheduledPods(ctx, runRef)
 		if err != nil {
 			return
 		}
@@ -393,28 +406,24 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 	}
 }
 
-func (r *Recommender) computeRunResult(ctx context.Context, nodePoolName, instanceType, zone string, runRef simRunRef, score nodeScore) runResult {
+func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, runRef simRunRef) error {
+	// remove the node with the nodeName
+	if err := r.engine.VirtualClusterAccess().DeleteNode(ctx, nodeName); err != nil {
+		return err
+	}
+	// remove the pods with nodeName
 	pods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, runRef.asMap())
 	if err != nil {
-		return runResult{err: err}
+		return err
 	}
-	unscheduledPods := make([]corev1.Pod, 0, len(pods))
-	nodeToPods := make(map[string][]types.NamespacedName)
+	// TODO(rishabh-11): This is incorrect. We should not delete only those pods with matching nodeName
+	podsToDelete := make([]corev1.Pod, 0, len(pods))
 	for _, pod := range pods {
-		if pod.Spec.NodeName == "" {
-			unscheduledPods = append(unscheduledPods, pod)
-		} else {
-			nodeToPods[pod.Spec.NodeName] = append(nodeToPods[pod.Spec.NodeName], client.ObjectKeyFromObject(&pod))
+		if pod.Spec.NodeName == nodeName {
+			podsToDelete = append(podsToDelete, pod)
 		}
 	}
-	return runResult{
-		nodePoolName:    nodePoolName,
-		zone:            zone,
-		instanceType:    instanceType,
-		nodeScore:       score,
-		unscheduledPods: unscheduledPods,
-		nodeToPods:      nodeToPods,
-	}
+	return r.engine.VirtualClusterAccess().DeletePods(ctx, podsToDelete...)
 }
 
 func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Context, instanceType, poolName, zone string, forSimRun bool, runRef *simRunRef) (*corev1.Node, error) {
@@ -458,24 +467,9 @@ func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Co
 	return node, nil
 }
 
-// TODO(rishabh-11): This needs to modified to return the list of unscheduled pods.
-func (r *Recommender) setupNodePoolSimRun(ctx context.Context, runRef simRunRef) error {
-	var nodeList []*corev1.Node
-	for _, node := range r.state.existingNodes {
-		nodeCopy := node.DeepCopy()
-		nodeCopy.Name = fromOriginalResourceName(node.Name, runRef.value)
-		nodeCopy.Labels[runRef.key] = runRef.value
-		nodeCopy.Spec.Taints = []corev1.Taint{
-			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule},
-		}
-		nodeList = append(nodeList, nodeCopy)
-	}
-	if err := r.engine.VirtualClusterAccess().AddNodes(ctx, nodeList...); err != nil {
-		return err
-	}
-
-	var podList []corev1.Pod
-	for _, pod := range r.state.scheduledPods {
+func (r *Recommender) createAndDeployUnscheduledPods(ctx context.Context, runRef simRunRef) ([]corev1.Pod, error) {
+	unscheduledPodList := make([]corev1.Pod, 0, len(r.state.unscheduledPods))
+	for _, pod := range r.state.unscheduledPods {
 		podCopy := pod.DeepCopy()
 		podCopy.Name = fromOriginalResourceName(podCopy.Name, runRef.value)
 		podCopy.Labels[runRef.key] = runRef.value
@@ -486,66 +480,66 @@ func (r *Recommender) setupNodePoolSimRun(ctx context.Context, runRef simRunRef)
 			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
 		}
 		podCopy.Spec.SchedulerName = virtualcluster.BinPackingSchedulerName
-		podCopy.Spec.NodeName = fromOriginalResourceName(pod.Spec.NodeName, runRef.value)
-		podList = append(podList, *podCopy)
+		unscheduledPodList = append(unscheduledPodList, *podCopy)
 	}
-	//for _, pod := range r.state.unscheduledPods {
-	//	podCopy := pod.DeepCopy()
-	//	podCopy.Name = fromOriginalResourceName(podCopy.Name, runRef.value)
-	//	podCopy.Labels[runRef.key] = runRef.value
-	//	podCopy.ObjectMeta.UID = ""
-	//	podCopy.ObjectMeta.ResourceVersion = ""
-	//	podCopy.ObjectMeta.CreationTimestamp = metav1.Time{}
-	//	podCopy.Spec.Tolerations = []corev1.Toleration{
-	//		{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
-	//	}
-	//	podCopy.Spec.SchedulerName = virtualcluster.BinPackingSchedulerName
-	//	podList = append(podList, *podCopy)
-	//}
-	return r.engine.VirtualClusterAccess().AddPods(ctx, podList...)
+	return unscheduledPodList, r.engine.VirtualClusterAccess().AddPods(ctx, unscheduledPodList...)
 }
 
-func (r *Recommender) sortPods(pods []corev1.Pod) {
-	if r.podOrder == "" {
-		return
-	} else if r.podOrder == "desc" {
-		slices.SortFunc(pods, func(i, j corev1.Pod) int {
-			return -i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
-		})
+func (r *Recommender) computeRunResult(ctx context.Context, nodePoolName, instanceType, zone string, runRef simRunRef, score nodeScore) runResult {
+	pods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, runRef.asMap())
+	if err != nil {
+		return runResult{err: err}
 	}
-	slices.SortFunc(pods, func(i, j corev1.Pod) int {
-		return i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
-	})
+	unscheduledPods := make([]corev1.Pod, 0, len(pods))
+	nodeToPods := make(map[string][]types.NamespacedName)
+	for _, pod := range pods {
+		if pod.Spec.NodeName == "" {
+			unscheduledPods = append(unscheduledPods, pod)
+		} else {
+			nodeToPods[pod.Spec.NodeName] = append(nodeToPods[pod.Spec.NodeName], client.ObjectKeyFromObject(&pod))
+		}
+	}
+	return runResult{
+		nodePoolName:    nodePoolName,
+		zone:            zone,
+		instanceType:    instanceType,
+		nodeScore:       score,
+		unscheduledPods: unscheduledPods,
+		nodeToPods:      nodeToPods,
+	}
 }
+
+func (r *Recommender) computeNodeScore(scaledNode *corev1.Node, candidatePods []corev1.Pod) nodeScore {
+	costRatio := r.strategyWeights.LeastCost * r.instanceTypeCostRatios[scaledNode.Labels["node.kubernetes.io/instance-type"]]
+	wasteRatio := r.strategyWeights.LeastWaste * computeWasteRatio(scaledNode, candidatePods)
+	unscheduledRatio := computeUnscheduledRatio(r.state.unscheduledPods)
+	cumulativeScore := wasteRatio + unscheduledRatio*costRatio
+	return nodeScore{
+		wasteRatio:       wasteRatio,
+		unscheduledRatio: unscheduledRatio,
+		costRatio:        costRatio,
+		cumulativeScore:  cumulativeScore,
+	}
+}
+
+//func (r *Recommender) sortPods(pods []corev1.Pod) {
+//	if r.podOrder == "" {
+//		return
+//	} else if r.podOrder == "desc" {
+//		slices.SortFunc(pods, func(i, j corev1.Pod) int {
+//			return -i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
+//		})
+//	}
+//	slices.SortFunc(pods, func(i, j corev1.Pod) int {
+//		return i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
+//	})
+//}
 
 func (r *Recommender) cleanUpNodePoolSimRun(ctx context.Context, runRef simRunRef) error {
 	labels := runRef.asMap()
 	err := r.engine.VirtualClusterAccess().DeletePodsWithMatchingLabels(ctx, labels)
 	err = r.engine.VirtualClusterAccess().DeleteNodesWithMatchingLabels(ctx, labels)
 	return err
-}
-
-func (r *Recommender) initializeEligibleNodePools(ctx context.Context, shoot *v1beta1.Shoot) error {
-	eligibleNodePools := make(map[string]scalesim.NodePool, len(shoot.Spec.Provider.Workers))
-	for _, worker := range shoot.Spec.Provider.Workers {
-		nodes, err := r.engine.VirtualClusterAccess().ListNodesInNodePool(ctx, worker.Name)
-		if err != nil {
-			return err
-		}
-		if int32(len(nodes)) >= worker.Maximum {
-			continue
-		}
-		nodePool := scalesim.NodePool{
-			Name:        worker.Name,
-			Zones:       worker.Zones,
-			Max:         worker.Maximum,
-			Current:     int32(len(nodes)),
-			MachineType: worker.Machine.Type,
-		}
-		eligibleNodePools[worker.Name] = nodePool
-	}
-	r.state.eligibleNodePools = eligibleNodePools
-	return nil
 }
 
 func getWinner(results []runResult) (Recommendation, runResult) {
@@ -584,50 +578,6 @@ func (r *Recommender) logError(err error) {
 	webutil.Log(r.logWriter, "Execution of scenario: "+r.scenarioName+" completed with error: "+err.Error())
 }
 
-func (r *Recommender) computeNodeScore(scaledNode *corev1.Node, candidatePods []corev1.Pod) nodeScore {
-	costRatio := r.strategyWeights.LeastCost * r.instanceTypeCostRatios[scaledNode.Labels["node.kubernetes.io/instance-type"]]
-	wasteRatio := r.strategyWeights.LeastWaste * computeWasteRatio(scaledNode, candidatePods)
-	unscheduledRatio := computeUnscheduledRatio(r.state.unscheduledPods)
-	cumulativeScore := wasteRatio + unscheduledRatio*costRatio
-	return nodeScore{
-		wasteRatio:       wasteRatio,
-		unscheduledRatio: unscheduledRatio,
-		costRatio:        costRatio,
-		cumulativeScore:  cumulativeScore,
-	}
-}
-
-func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, runRef simRunRef) error {
-	// remove the node with the nodeName
-	if err := r.engine.VirtualClusterAccess().DeleteNode(ctx, nodeName); err != nil {
-		return err
-	}
-	// remove the pods with nodeName
-	pods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, runRef.asMap())
-	if err != nil {
-		return err
-	}
-	// TODO(rishabh-11): This is incorrect. We should not delete only those pods with matching nodeName
-	podsToDelete := make([]corev1.Pod, 0, len(pods))
-	for _, pod := range pods {
-		if pod.Spec.NodeName == nodeName {
-			podsToDelete = append(podsToDelete, pod)
-		}
-	}
-	return r.engine.VirtualClusterAccess().DeletePods(ctx, podsToDelete...)
-	//return r.engine.VirtualClusterAccess().CreatePodsWithNodeAndScheduler(ctx, virtualcluster.BinPackingSchedulerName, "", podsToDelete...)
-}
-
-func (r *Recommender) computeCostRatiosForInstanceTypes(workerPools []v1beta1.Worker) {
-	totalCost := lo.Reduce[v1beta1.Worker, float64](workerPools, func(totalCost float64, pool v1beta1.Worker, _ int) float64 {
-		return totalCost + pricing.GetPricing(pool.Machine.Type)
-	}, 0.0)
-	for _, pool := range workerPools {
-		price := pricing.GetPricing(pool.Machine.Type)
-		r.instanceTypeCostRatios[pool.Machine.Type] = price / totalCost
-	}
-}
-
 func computeUnscheduledRatio(candidatePods []corev1.Pod) float64 {
 	var totalAssignedPods int
 	for _, pod := range candidatePods {
@@ -662,22 +612,4 @@ func fromOriginalResourceName(name, suffix string) string {
 
 func toOriginalResourceName(simResName string) string {
 	return strings.Split(simResName, "-simrun-")[0]
-}
-
-func (r *Recommender) CreateAndDeployUnscheduledPods(ctx context.Context, runRef simRunRef) ([]corev1.Pod, error) {
-	unscheduledPodList := make([]corev1.Pod, 0, len(r.state.unscheduledPods))
-	for _, pod := range r.state.unscheduledPods {
-		podCopy := pod.DeepCopy()
-		podCopy.Name = fromOriginalResourceName(podCopy.Name, runRef.value)
-		podCopy.Labels[runRef.key] = runRef.value
-		podCopy.ObjectMeta.UID = ""
-		podCopy.ObjectMeta.ResourceVersion = ""
-		podCopy.ObjectMeta.CreationTimestamp = metav1.Time{}
-		podCopy.Spec.Tolerations = []corev1.Toleration{
-			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
-		}
-		podCopy.Spec.SchedulerName = virtualcluster.BinPackingSchedulerName
-		unscheduledPodList = append(unscheduledPodList, *podCopy)
-	}
-	return unscheduledPodList, r.engine.VirtualClusterAccess().AddPods(ctx, unscheduledPodList...)
 }
