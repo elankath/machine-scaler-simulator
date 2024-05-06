@@ -61,7 +61,7 @@ NG1 wins!!
 
 #### Case 3 (case-up-3)
 
-` curl -XPOST 'localhost:8080/scenarios/score4?small=11&large=1&leastWaste=1.0&leastCost=1.0&shoot=case-up-3&podOrder=desc'`
+`curl -XPOST 'localhost:8080/scenarios/score4?small=11&large=1&leastWaste=1.0&leastCost=1.0&shoot=case-up-3&podOrder=desc'`
 
 ```
 (single zone workerpool)

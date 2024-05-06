@@ -2,9 +2,10 @@ package score5
 
 import (
 	"fmt"
-	"github.com/elankath/scaler-simulator/recommender"
 	"net/http"
 	"time"
+
+	"github.com/elankath/scaler-simulator/recommender"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/simutil"
@@ -100,7 +101,7 @@ func (s *scenarioscore5) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		allPods = append(allPods, largePods...)
 	} else {
 		delete(smallPodLabels, "foo")
-		smallPods, err := constructPodsWithoutTSC("small", virtualcluster.BinPackingSchedulerName, "", "3Gi", "100m", smallCount, smallPodLabels)
+		smallPods, err := constructPodsWithoutTSC("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount, smallPodLabels)
 		if err != nil {
 			webutil.InternalError(w, err)
 			return

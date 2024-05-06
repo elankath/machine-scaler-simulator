@@ -15,6 +15,7 @@ import (
 
 	"github.com/elankath/scaler-simulator/pricing"
 	"github.com/samber/lo"
+	"golang.org/x/exp/maps"
 	"golang.org/x/exp/rand"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -158,12 +159,14 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 			webutil.Log(r.logWriter, "All pods are scheduled. Exiting the loop...")
 			break
 		}
-
+		simRunStartTime := time.Now()
 		recommendation, winnerRunResult, err := r.runSimulation(ctx, runNumber)
+		webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d completed in %f seconds", runNumber, time.Since(simRunStartTime).Seconds()))
 		if err != nil {
 			webutil.Log(r.logWriter, fmt.Sprintf("runSimulation for shoot %s failed, err: %v", shoot.Name, err))
 			break
 		}
+
 		if recommendation == nil {
 			webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d, no winner could be identified. This will happen when no pods could be assgined. No more runs are required, exiting early", runNumber))
 			break
@@ -273,6 +276,10 @@ func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommend
 }
 
 func (r *Recommender) syncWinningResult(ctx context.Context, recommendation *Recommendation, winningRunResult *runResult) error {
+	startTime := time.Now()
+	defer func() {
+		webutil.Log(r.logWriter, fmt.Sprintf("syncWinningResult for nodePool: %s completed in %f seconds", recommendation.nodePoolName, time.Since(startTime).Seconds()))
+	}()
 	winningNodeName, scheduledPodNames, err := r.syncClusterWithWinningResult(ctx, winningRunResult)
 	if err != nil {
 		return err
@@ -283,12 +290,6 @@ func (r *Recommender) syncWinningResult(ctx context.Context, recommendation *Rec
 func (r *Recommender) syncClusterWithWinningResult(ctx context.Context, winningRunResult *runResult) (string, []string, error) {
 	node, err := r.constructNodeFromExistingNodeOfInstanceType(winningRunResult.instanceType, winningRunResult.nodePoolName, winningRunResult.zone, false, nil)
 	if err != nil {
-		return "", nil, err
-	}
-	if err = r.engine.VirtualClusterAccess().AddNodes(ctx, node); err != nil {
-		return "", nil, err
-	}
-	if err = r.engine.VirtualClusterAccess().RemoveTaintFromVirtualNode(ctx, node.Name, "node.kubernetes.io/not-ready"); err != nil {
 		return "", nil, err
 	}
 	var originalPods []corev1.Pod
@@ -308,10 +309,16 @@ func (r *Recommender) syncClusterWithWinningResult(ctx context.Context, winningR
 			scheduledPods = append(scheduledPods, *podCopy)
 		}
 	}
-	if err = r.engine.VirtualClusterAccess().DeletePods(ctx, originalPods...); err != nil {
+	if err := r.engine.VirtualClusterAccess().DeletePods(ctx, originalPods...); err != nil {
 		return "", nil, err
 	}
 	if err = r.engine.VirtualClusterAccess().AddPods(ctx, scheduledPods...); err != nil {
+		return "", nil, err
+	}
+	if err = r.engine.VirtualClusterAccess().AddNodes(ctx, node); err != nil {
+		return "", nil, err
+	}
+	if err = r.engine.VirtualClusterAccess().RemoveTaintFromVirtualNode(ctx, node.Name, "node.kubernetes.io/not-ready"); err != nil {
 		return "", nil, err
 	}
 	return node.Name, simutil.PodNames(scheduledPods), nil
@@ -339,19 +346,24 @@ func (r *Recommender) syncRecommenderStateWithWinningResult(ctx context.Context,
 
 func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, resultCh chan runResult, runNum int) {
 	wg := &sync.WaitGroup{}
+	webutil.Log(r.logWriter, fmt.Sprintf("Starting simulation runs for %v nodePools", maps.Keys(r.state.eligibleNodePools)))
 	for _, nodePool := range r.state.eligibleNodePools {
-		wg.Add(len(nodePool.Zones))
+		wg.Add(1)
 		runRef := simRunRef{
 			key:   "app.kubernetes.io/simulation-run",
 			value: nodePool.Name + "-" + strconv.Itoa(runNum),
 		}
-		go r.runSimulationForNodePool(ctx, wg, nodePool, resultCh, runRef)
+		r.runSimulationForNodePool(ctx, wg, nodePool, resultCh, runRef)
 	}
 	wg.Wait()
 	close(resultCh)
 }
 
 func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.WaitGroup, nodePool scalesim.NodePool, resultCh chan runResult, runRef simRunRef) {
+	simRunStartTime := time.Now()
+	defer func() {
+		webutil.Log(r.logWriter, fmt.Sprintf("Simulation run: %s for nodePool: %s completed in %f seconds", runRef.value, nodePool.Name, time.Since(simRunStartTime).Seconds()))
+	}()
 	defer wg.Done()
 	defer func() {
 		if err := r.cleanUpNodePoolSimRun(ctx, runRef); err != nil {
@@ -365,6 +377,7 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 		node *corev1.Node
 		err  error
 	)
+	slog.Info("Simulation Run", "run-no", runRef.value, "node-pool", nodePool.Name, "num-zones", len(nodePool.Zones))
 	for _, zone := range nodePool.Zones {
 		webutil.Log(r.logWriter, fmt.Sprintf("Starting simulation run: %s for nodePool: %s in zone: %s", runRef.value, nodePool.Name, zone))
 		if node != nil {
