@@ -100,7 +100,7 @@ func (s *scenarioscore5) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		allPods = append(allPods, largePods...)
 	} else {
 		delete(smallPodLabels, "foo")
-		smallPods, err := constructPodsWithoutTSC("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount, smallPodLabels)
+		smallPods, err := constructPodsWithoutTSC("small", virtualcluster.BinPackingSchedulerName, "", "3Gi", "100m", smallCount, smallPodLabels)
 		if err != nil {
 			webutil.InternalError(w, err)
 			return
@@ -120,6 +120,10 @@ func (s *scenarioscore5) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.Log(w, "Execution of scenario: "+scenarioName+" completed with error: "+err.Error())
 		return
 	}
+	if err = s.engine.VirtualClusterAccess().InitializeReferenceNodes(r.Context()); err != nil {
+		webutil.Log(w, "Execution of scenario: "+scenarioName+" completed with error: "+err.Error())
+		return
+	}
 
 	recommender := recommender.NewRecommender(s.engine, scenarioName, shootName, podOrder, recommender.StrategyWeights{
 		LeastWaste: leastWasteWeight,
@@ -127,6 +131,7 @@ func (s *scenarioscore5) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}, w)
 
 	startTime := time.Now()
+
 	recommendation, err := recommender.Run(r.Context())
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())

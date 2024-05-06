@@ -253,7 +253,7 @@ func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommend
 
 	var results []runResult
 	resultCh := make(chan runResult, len(r.state.eligibleNodePools))
-	go r.triggerNodePoolSimulations(ctx, resultCh, runNum)
+	r.triggerNodePoolSimulations(ctx, resultCh, runNum)
 
 	// label, taint, result chan, error chan, close chan
 	var errs error
@@ -281,7 +281,7 @@ func (r *Recommender) syncWinningResult(ctx context.Context, recommendation *Rec
 }
 
 func (r *Recommender) syncClusterWithWinningResult(ctx context.Context, winningRunResult *runResult) (string, []string, error) {
-	node, err := r.constructNodeFromExistingNodeOfInstanceType(ctx, winningRunResult.instanceType, winningRunResult.nodePoolName, winningRunResult.zone, false, nil)
+	node, err := r.constructNodeFromExistingNodeOfInstanceType(winningRunResult.instanceType, winningRunResult.nodePoolName, winningRunResult.zone, false, nil)
 	if err != nil {
 		return "", nil, err
 	}
@@ -373,7 +373,7 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 				return
 			}
 		}
-		node, err = r.constructNodeFromExistingNodeOfInstanceType(ctx, nodePool.MachineType, nodePool.Name, zone, true, &runRef)
+		node, err = r.constructNodeFromExistingNodeOfInstanceType(nodePool.MachineType, nodePool.Name, zone, true, &runRef)
 		if err != nil {
 			resultCh <- createErrorResult(err)
 			return
@@ -426,8 +426,8 @@ func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, 
 	return r.engine.VirtualClusterAccess().DeletePods(ctx, podsToDelete...)
 }
 
-func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(ctx context.Context, instanceType, poolName, zone string, forSimRun bool, runRef *simRunRef) (*corev1.Node, error) {
-	referenceNode, err := r.engine.VirtualClusterAccess().GetReferenceNode(ctx, instanceType)
+func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(instanceType, poolName, zone string, forSimRun bool, runRef *simRunRef) (*corev1.Node, error) {
+	referenceNode, err := r.engine.VirtualClusterAccess().GetReferenceNode(instanceType)
 	if err != nil {
 		return nil, err
 	}

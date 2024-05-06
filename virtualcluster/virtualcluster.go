@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"sync"
 	"syscall"
 	"time"
 
@@ -37,6 +38,8 @@ type access struct {
 	restConfig           *rest.Config
 	environment          *envtest.Environment
 	kubeSchedulerProcess *os.Process
+	referenceNodes       map[string]corev1.Node
+	mu                   sync.Mutex
 }
 
 var _ scalesim.VirtualClusterAccess = (*access)(nil) // Verify that *T implements I.
@@ -191,8 +194,8 @@ func InitializeAccess(scheme *runtime.Scheme, binaryAssetsDir string, apiServerF
 	}
 
 	cfg, err := env.Start()
-	cfg.QPS = 100
-	cfg.Burst = 100
+	cfg.QPS = -1
+	cfg.Burst = -1
 	if err != nil {
 		return nil, err
 	}
@@ -216,6 +219,7 @@ func InitializeAccess(scheme *runtime.Scheme, binaryAssetsDir string, apiServerF
 		restConfig:           cfg,
 		environment:          env,
 		kubeSchedulerProcess: schedulerProcess,
+		referenceNodes:       make(map[string]corev1.Node),
 	}
 	if err != nil {
 		slog.Info("cannot start kube-scheduler.", "error", err)
@@ -267,17 +271,29 @@ func (a *access) AddNodes(ctx context.Context, nodes ...*corev1.Node) error {
 	return nil
 }
 
-func (a *access) GetReferenceNode(ctx context.Context, instanceType string) (*corev1.Node, error) {
-	labels := map[string]string{"node.kubernetes.io/instance-type": instanceType, "app.kubernetes.io/existing-node": "true"}
+func (a *access) InitializeReferenceNodes(ctx context.Context) error {
+	const instanceTypeLabelKey = "node.kubernetes.io/instance-type"
+	labels := map[string]string{"app.kubernetes.io/existing-node": "true"}
 	nodes, err := a.ListNodesMatchingLabels(ctx, labels)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	// TODO: scale from zero not handled
-	if len(nodes) == 0 {
-		return nil, fmt.Errorf("no node found for instance type %s", instanceType)
+	for _, node := range nodes {
+		instanceType, ok := node.Labels[instanceTypeLabelKey]
+		if !ok {
+			return fmt.Errorf("existing node %s does not have %s label", node.Name, instanceTypeLabelKey)
+		}
+		a.referenceNodes[instanceType] = node
 	}
-	return &nodes[0], nil
+	return nil
+}
+
+func (a *access) GetReferenceNode(instanceType string) (*corev1.Node, error) {
+	if refNode, ok := a.referenceNodes[instanceType]; ok {
+		return &refNode, nil
+	} else {
+		return nil, fmt.Errorf("no reference node matching instance type %s found", instanceType)
+	}
 }
 
 func (a *access) ListNodes(ctx context.Context) ([]corev1.Node, error) {

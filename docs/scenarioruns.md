@@ -79,9 +79,9 @@ Result of using ksc+algo (lW = 1,lC = 1.5,pd = none) -> 11 * NG1 + 1 * NG2
 Result of using ksc+algo (lW = 1,lC = 1.5,pd = desc) ->  11 * NG1 + 1 * NG2
 ```
 
-#### Case 4 (case-up-4)
+#### Case 4 (scenario-4)
 
-`curl -XPOST 'localhost:8080/scenarios/score4?small=10&large=2&leastWaste=1.0&leastCost=1.0&shoot=case-up-4&podOrder=desc&withTSC=true'`
+`curl -XPOST 'localhost:8080/scenarios/score5?small=10&large=2&leastWaste=1.0&leastCost=1.0&shoot=scenario-4&podOrder=desc&withTSC=true'`
 
 ```
 (single zone workerpool with each workerpool in different zone)
@@ -101,6 +101,8 @@ Result of using ksc+algo (lW = 1,lC = 1, pd = none) -> 3 * NG1 + 4 * NG2 + 1 * N
 Result of using ksc+algo (lW = 1,lC = 1, pd = desc) -> 3 * NG1 + 4 * NG2 + 1 * NG3
 Result of using ksc+algo (lW = 1,lC = 1.5,pd = none) -> 3 * NG1 + 4 * NG2 + 1 * NG3 
 Result of using ksc+algo (lW = 1,lC = 1.5,pd = desc) -> 3 * NG1 + 4 * NG2 + 1 * NG3 
+
+Result of using ksc+newAlgo(least waste(capacity and not allocatable) + cost * unscheduled) ->  3 * NG1, 3 * NG2, 1 * NG3
 ```
 
 ####  Case 5 (case-up-5)
@@ -139,6 +141,9 @@ Scaleup : 1 * NG3
 
 Result of using ksc+algo (lW = 1,lC = 1, pd = none, desc) -> 1 * NG1 + 1 * NG2 + 1 * NG3 
 Result of using ksc+algo (lW = 1,lC = 1.5, pd = none, desc) -> 1 * NG1 + 1 * NG2 + 1 * NG3 
+
+Result of using ksc+newAlgo(least waste(capacity and not allocatable) + cost * unscheduled) ->  1 * NG1, 1 * NG2, 1 * NG3
+
 ```
 
 ### Conclusion:- 
