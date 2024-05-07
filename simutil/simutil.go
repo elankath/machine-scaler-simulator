@@ -142,7 +142,7 @@ loop:
 				}
 			}
 			//webutil.Log(w, fmt.Sprintf("Scheduled Pods: %d, Unscheduled Pods: %d, Total Pods : %d", len(scheduledPodNames), len(unscheduledPodNames), len(pods)))
-			slog.Info("Scheduled Pods: %d, Unscheduled Pods: %d, Total Pods : %d", len(scheduledPodNames), len(unscheduledPodNames), len(pods))
+			slog.Info(fmt.Sprintf("Scheduled Pods: %d, Unscheduled Pods: %d, Total Pods : %d", len(scheduledPodNames), len(unscheduledPodNames), len(pods)))
 			if len(scheduledPodNames)+len(unscheduledPodNames) == len(pods) {
 				break loop
 			}
@@ -293,7 +293,7 @@ func CreateNodeInWorkerGroupForZone(ctx context.Context, a scalesim.VirtualClust
 	node.Labels["topology.kubernetes.io/zone"] = zone
 	node.Labels["topology.kubernetes.io/region"] = region
 	delete(node.Labels, "app.kubernetes.io/existing-node")
-	if err := a.AddNodes(ctx, &node); err != nil {
+	if err := a.AddNodesAndUpdateLabels(ctx, &node); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -357,7 +357,7 @@ func CreateNodeInWorkerGroup(ctx context.Context, a scalesim.VirtualClusterAcces
 	if err != nil {
 		return nil, err
 	}
-	if err := a.AddNodes(ctx, &node); err != nil {
+	if err := a.AddNodesAndUpdateLabels(ctx, &node); err != nil {
 		return nil, err
 	}
 	newNodes, err := GetNodesSet(ctx, a)

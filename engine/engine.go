@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/elankath/scaler-simulator/scenarios/scaledown/simplescenario"
-	"github.com/elankath/scaler-simulator/scenarios/scaledown/tscscenario"
-	"github.com/elankath/scaler-simulator/scenarios/score4"
-	"github.com/elankath/scaler-simulator/scenarios/score5"
 	"log/slog"
 	"net/http"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/elankath/scaler-simulator/scenarios/scaledown/simplescenario"
+	"github.com/elankath/scaler-simulator/scenarios/scaledown/tscscenario"
+	"github.com/elankath/scaler-simulator/scenarios/score4"
+	"github.com/elankath/scaler-simulator/scenarios/score5"
 
 	"github.com/elankath/scaler-simulator/scenarios/p"
 
@@ -142,7 +143,7 @@ func (e *engine) SyncVirtualNodesWithShoot(ctx context.Context, shootName string
 		})
 	}
 
-	err = e.VirtualClusterAccess().AddNodes(ctx, nodes...)
+	err = e.VirtualClusterAccess().AddNodesAndUpdateLabels(ctx, nodes...)
 	if err != nil {
 		slog.Error("cannot add nodes to virtual-cluster.", "error", err)
 		return err

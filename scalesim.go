@@ -38,8 +38,10 @@ type VirtualClusterAccess interface {
 	// KubeConfigPath gets path to the kubeconfig.yaml file that can be used by kubectl to connect to this vitual cluster
 	KubeConfigPath() string
 
-	// AddNodes adds the given slice of k8s Nodes to the virtual cluster
-	AddNodes(context.Context, ...*corev1.Node) error
+	// AddNodesAndUpdateLabels adds the given slice of k8s Nodes to the virtual cluster
+	AddNodesAndUpdateLabels(context.Context, ...*corev1.Node) error
+
+	AddNodes(ctx context.Context, nodes ...*corev1.Node) error
 
 	// RemoveAllTaintsFromVirtualNodes removes the NoSchedule taint from all nodes in the virtual cluster
 	RemoveAllTaintsFromVirtualNodes(context.Context) error

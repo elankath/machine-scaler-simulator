@@ -86,7 +86,7 @@ func ScaleDownOrderedByDescendingCost(ctx context.Context, vca scalesim.VirtualC
 }
 
 func recreateNodeWithPods(ctx context.Context, vca scalesim.VirtualClusterAccess, node *corev1.Node, pods []corev1.Pod) error {
-	if err := vca.AddNodes(ctx, node); err != nil {
+	if err := vca.AddNodesAndUpdateLabels(ctx, node); err != nil {
 		return err
 	}
 	if err := vca.RemoveAllTaintsFromVirtualNode(ctx, node.Name); err != nil {

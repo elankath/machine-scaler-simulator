@@ -315,7 +315,7 @@ func (r *Recommender) syncClusterWithWinningResult(ctx context.Context, winningR
 	if err = r.engine.VirtualClusterAccess().AddPods(ctx, scheduledPods...); err != nil {
 		return "", nil, err
 	}
-	if err = r.engine.VirtualClusterAccess().AddNodes(ctx, node); err != nil {
+	if err = r.engine.VirtualClusterAccess().AddNodesAndUpdateLabels(ctx, node); err != nil {
 		return "", nil, err
 	}
 	if err = r.engine.VirtualClusterAccess().RemoveTaintFromVirtualNode(ctx, node.Name, "node.kubernetes.io/not-ready"); err != nil {
@@ -373,11 +373,15 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, logger *webu
 			logger.Log(r.logWriter, "Error cleaning up simulation run: "+runRef.value+" err: "+err.Error())
 		}
 	}()
-
 	var (
 		node *corev1.Node
 		err  error
 	)
+	// create a copy of all nodes and scheduled pods only
+	if err = r.setupSimulationRun(ctx, runRef); err != nil {
+		resultCh <- createErrorResult(err)
+		return
+	}
 	for _, zone := range nodePool.Zones {
 		if node != nil {
 			if err = r.resetNodePoolSimRun(ctx, node.Name, runRef); err != nil {
@@ -390,7 +394,7 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, logger *webu
 			resultCh <- createErrorResult(err)
 			return
 		}
-		if err = r.engine.VirtualClusterAccess().AddNodes(ctx, node); err != nil {
+		if err = r.engine.VirtualClusterAccess().AddNodesAndUpdateLabels(ctx, node); err != nil {
 			resultCh <- createErrorResult(err)
 			return
 		}
@@ -419,6 +423,52 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, logger *webu
 	}
 }
 
+func (r *Recommender) setupSimulationRun(ctx context.Context, runRef simRunRef) error {
+	// create copy of all nodes (barring existing nodes)
+	clonedNodes := make([]*corev1.Node, 0, len(r.state.existingNodes))
+	for _, node := range r.state.existingNodes {
+		nodeCopy := node.DeepCopy()
+		nodeCopy.Name = fromOriginalResourceName(nodeCopy.Name, runRef.value)
+		nodeCopy.Labels[runRef.key] = runRef.value
+		nodeCopy.Labels["kubernetes.io/hostname"] = nodeCopy.Name
+		nodeCopy.ObjectMeta.UID = ""
+		nodeCopy.ObjectMeta.ResourceVersion = ""
+		nodeCopy.ObjectMeta.CreationTimestamp = metav1.Time{}
+		nodeCopy.Spec.Taints = []corev1.Taint{
+			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule},
+		}
+		clonedNodes = append(clonedNodes, nodeCopy)
+	}
+	if err := r.engine.VirtualClusterAccess().AddNodes(ctx, clonedNodes...); err != nil {
+		return err
+	}
+
+	// create copy of all scheduled pods
+	clonedScheduledPods := make([]corev1.Pod, 0, len(r.state.scheduledPods))
+	for _, pod := range r.state.scheduledPods {
+		podCopy := pod.DeepCopy()
+		podCopy.Name = fromOriginalResourceName(podCopy.Name, runRef.value)
+		podCopy.Labels[runRef.key] = runRef.value
+		podCopy.ObjectMeta.UID = ""
+		podCopy.ObjectMeta.ResourceVersion = ""
+		podCopy.ObjectMeta.CreationTimestamp = metav1.Time{}
+		podCopy.Spec.Tolerations = []corev1.Toleration{
+			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
+		}
+		if len(podCopy.Spec.TopologySpreadConstraints) > 0 {
+			for _, tsc := range podCopy.Spec.TopologySpreadConstraints {
+				tsc.LabelSelector.MatchLabels[runRef.key] = runRef.value
+			}
+		}
+		podCopy.Spec.NodeName = fromOriginalResourceName(podCopy.Spec.NodeName, runRef.value)
+		clonedScheduledPods = append(clonedScheduledPods, *podCopy)
+	}
+	if err := r.engine.VirtualClusterAccess().AddPods(ctx, clonedScheduledPods...); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, runRef simRunRef) error {
 	// remove the node with the nodeName
 	if err := r.engine.VirtualClusterAccess().DeleteNode(ctx, nodeName); err != nil {
@@ -430,14 +480,6 @@ func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, 
 		return err
 	}
 	return r.engine.VirtualClusterAccess().DeletePods(ctx, pods...)
-	//// TODO(rishabh-11): This is incorrect. We should not delete only those pods with matching nodeName
-	//podsToDelete := make([]corev1.Pod, 0, len(pods))
-	//for _, pod := range pods {
-	//	if pod.Spec.NodeName == nodeName {
-	//		podsToDelete = append(podsToDelete, pod)
-	//	}
-	//}
-	//return r.engine.VirtualClusterAccess().DeletePods(ctx, podsToDelete...)
 }
 
 func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(instanceType, poolName, zone string, forSimRun bool, runRef *simRunRef) (*corev1.Node, error) {

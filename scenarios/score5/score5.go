@@ -79,7 +79,7 @@ func (s *scenarioscore5) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if withTSC == "true" {
 		webutil.Log(w, "Creating Pods with TopologySpreadConstraints")
-		topologyKeyForZone := "failure-domain.beta.kubernetes.io/zone"
+		topologyKeyForZone := "topology.kubernetes.io/zone"
 		maxSkew := 1
 		matchingTSCLabels := map[string]string{
 			"foo": "bar",

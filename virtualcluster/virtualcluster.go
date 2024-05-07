@@ -245,7 +245,7 @@ func (a *access) Shutdown() {
 	return
 }
 
-func (a *access) AddNodes(ctx context.Context, nodes ...*corev1.Node) error {
+func (a *access) AddNodesAndUpdateLabels(ctx context.Context, nodes ...*corev1.Node) error {
 	for _, n := range nodes {
 		n.ObjectMeta.ResourceVersion = ""
 		n.ObjectMeta.UID = ""
@@ -265,6 +265,18 @@ func (a *access) AddNodes(ctx context.Context, nodes ...*corev1.Node) error {
 		err := a.client.Update(ctx, &node)
 		if err != nil {
 			slog.Error("cannot update node", "name", node.Name, "error", err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *access) AddNodes(ctx context.Context, nodes ...*corev1.Node) error {
+	for _, n := range nodes {
+		n.ObjectMeta.ResourceVersion = ""
+		n.ObjectMeta.UID = ""
+		err := a.client.Create(ctx, n)
+		if err != nil {
 			return err
 		}
 	}
