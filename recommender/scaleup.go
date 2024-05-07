@@ -353,7 +353,8 @@ func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, resultCh c
 			key:   "app.kubernetes.io/simulation-run",
 			value: nodePool.Name + "-" + strconv.Itoa(runNum),
 		}
-		r.runSimulationForNodePool(ctx, wg, nodePool, resultCh, runRef)
+		webutil.Log(r.logWriter, fmt.Sprintf("Triggering simulation run: %v for nodePool: %s", runRef, nodePool.Name))
+		go r.runSimulationForNodePool(ctx, wg, nodePool, resultCh, runRef)
 	}
 	wg.Wait()
 	close(resultCh)
@@ -361,10 +362,10 @@ func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, resultCh c
 
 func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.WaitGroup, nodePool scalesim.NodePool, resultCh chan runResult, runRef simRunRef) {
 	simRunStartTime := time.Now()
+	defer wg.Done()
 	defer func() {
 		webutil.Log(r.logWriter, fmt.Sprintf("Simulation run: %s for nodePool: %s completed in %f seconds", runRef.value, nodePool.Name, time.Since(simRunStartTime).Seconds()))
 	}()
-	defer wg.Done()
 	defer func() {
 		if err := r.cleanUpNodePoolSimRun(ctx, runRef); err != nil {
 			// In the productive code, there will not be any real KAPI and ETCD. Fake API server will never return an error as everything will be in memory.
@@ -409,13 +410,14 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 			resultCh <- createErrorResult(err)
 			return
 		}
-		simRunCandidatePods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, runRef.asMap())
+		simRunCandidatePods, err := r.engine.VirtualClusterAccess().GetPods(ctx, "default", simutil.PodNames(unscheduledPods))
+		//simRunCandidatePods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, runRef.asMap())
 		if err != nil {
 			resultCh <- createErrorResult(err)
 			return
 		}
 		ns := r.computeNodeScore(node, simRunCandidatePods)
-		resultCh <- r.computeRunResult(ctx, nodePool.Name, nodePool.MachineType, zone, runRef, ns)
+		resultCh <- r.computeRunResult(nodePool.Name, nodePool.MachineType, zone, ns, simRunCandidatePods)
 	}
 }
 
@@ -429,14 +431,15 @@ func (r *Recommender) resetNodePoolSimRun(ctx context.Context, nodeName string, 
 	if err != nil {
 		return err
 	}
-	// TODO(rishabh-11): This is incorrect. We should not delete only those pods with matching nodeName
-	podsToDelete := make([]corev1.Pod, 0, len(pods))
-	for _, pod := range pods {
-		if pod.Spec.NodeName == nodeName {
-			podsToDelete = append(podsToDelete, pod)
-		}
-	}
-	return r.engine.VirtualClusterAccess().DeletePods(ctx, podsToDelete...)
+	return r.engine.VirtualClusterAccess().DeletePods(ctx, pods...)
+	//// TODO(rishabh-11): This is incorrect. We should not delete only those pods with matching nodeName
+	//podsToDelete := make([]corev1.Pod, 0, len(pods))
+	//for _, pod := range pods {
+	//	if pod.Spec.NodeName == nodeName {
+	//		podsToDelete = append(podsToDelete, pod)
+	//	}
+	//}
+	//return r.engine.VirtualClusterAccess().DeletePods(ctx, podsToDelete...)
 }
 
 func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(instanceType, poolName, zone string, forSimRun bool, runRef *simRunRef) (*corev1.Node, error) {
@@ -498,11 +501,7 @@ func (r *Recommender) createAndDeployUnscheduledPods(ctx context.Context, runRef
 	return unscheduledPodList, r.engine.VirtualClusterAccess().AddPods(ctx, unscheduledPodList...)
 }
 
-func (r *Recommender) computeRunResult(ctx context.Context, nodePoolName, instanceType, zone string, runRef simRunRef, score nodeScore) runResult {
-	pods, err := r.engine.VirtualClusterAccess().ListPodsMatchingLabels(ctx, runRef.asMap())
-	if err != nil {
-		return runResult{err: err}
-	}
+func (r *Recommender) computeRunResult(nodePoolName, instanceType, zone string, score nodeScore, pods []corev1.Pod) runResult {
 	unscheduledPods := make([]corev1.Pod, 0, len(pods))
 	nodeToPods := make(map[string][]types.NamespacedName)
 	for _, pod := range pods {

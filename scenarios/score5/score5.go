@@ -1,6 +1,7 @@
 package score5
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -126,14 +127,14 @@ func (s *scenarioscore5) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	recommender := recommender.NewRecommender(s.engine, scenarioName, shootName, podOrder, recommender.StrategyWeights{
+	reco := recommender.NewRecommender(s.engine, scenarioName, shootName, podOrder, recommender.StrategyWeights{
 		LeastWaste: leastWasteWeight,
 		LeastCost:  leastCostWeight,
 	}, w)
 
 	startTime := time.Now()
 
-	recommendation, err := recommender.Run(r.Context())
+	recommendation, err := reco.Run(context.Background())
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		return

@@ -84,6 +84,7 @@ type VirtualClusterAccess interface {
 	Shutdown()
 
 	GetPod(ctx context.Context, fullName types.NamespacedName) (*corev1.Pod, error)
+	GetPods(ctx context.Context, namespace string, podNames []string) ([]corev1.Pod, error)
 	GetNode(ctx context.Context, namespaceName types.NamespacedName) (*corev1.Node, error)
 	ListEvents(cts context.Context) ([]corev1.Event, error)
 	ListNodes(ctx context.Context) ([]corev1.Node, error)

@@ -307,20 +307,45 @@ func (a *access) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 
 func (a *access) ListNodesMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Node, error) {
 	nodeList := corev1.NodeList{}
-	if err := a.client.List(ctx, &nodeList, client.MatchingLabels(labels)); err != nil {
-		slog.Error("cannot list nodes with matching labels", "labels", labels, "error", err)
+	//if err := a.client.List(ctx, &nodeList, client.MatchingLabels(labels)); err != nil {
+	//	slog.Error("cannot list nodes with matching labels", "labels", labels, "error", err)
+	//	return nil, err
+	//}
+	if err := a.client.List(ctx, &nodeList); err != nil {
+		slog.Error("cannot list nodes", "labels", labels, "error", err)
 		return nil, err
 	}
-	return nodeList.Items, nil
+	filteredNodes := make([]corev1.Node, 0, len(nodeList.Items))
+	for _, node := range nodeList.Items {
+		if matchesLabels(node.ObjectMeta, labels) {
+			filteredNodes = append(filteredNodes, node)
+		}
+	}
+	return filteredNodes, nil
+}
+
+func matchesLabels(meta metav1.ObjectMeta, labels map[string]string) bool {
+	for k, v := range labels {
+		if meta.Labels[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *access) ListPodsMatchingLabels(ctx context.Context, labels map[string]string) ([]corev1.Pod, error) {
 	podList := corev1.PodList{}
-	if err := a.client.List(ctx, &podList, client.MatchingLabels(labels)); err != nil {
-		slog.Error("cannot list pods with matching labels", "labels", labels, "error", err)
+	if err := a.client.List(ctx, &podList); err != nil {
+		slog.Error("cannot list nodes", "labels", labels, "error", err)
 		return nil, err
 	}
-	return podList.Items, nil
+	filteredPods := make([]corev1.Pod, 0, len(podList.Items))
+	for _, pod := range podList.Items {
+		if matchesLabels(pod.ObjectMeta, labels) {
+			filteredPods = append(filteredPods, pod)
+		}
+	}
+	return filteredPods, nil
 }
 
 func (a *access) ListPodsMatchingPodNames(ctx context.Context, namespace string, podNames []string) ([]corev1.Pod, error) {
@@ -360,6 +385,18 @@ func (a *access) GetPod(ctx context.Context, fullName types.NamespacedName) (*co
 	pod := corev1.Pod{}
 	err := a.client.Get(ctx, fullName, &pod)
 	return &pod, err
+}
+
+func (a *access) GetPods(ctx context.Context, namespace string, podNames []string) ([]corev1.Pod, error) {
+	pods := make([]corev1.Pod, 0, len(podNames))
+	for _, podName := range podNames {
+		pod := corev1.Pod{}
+		if err := client.IgnoreNotFound(a.client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: podName}, &pod)); err != nil {
+			return nil, err
+		}
+		pods = append(pods, pod)
+	}
+	return pods, nil
 }
 
 func (a *access) GetNode(ctx context.Context, namespaceName types.NamespacedName) (*corev1.Node, error) {

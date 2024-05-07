@@ -39,8 +39,8 @@ func main() {
 
 	virtualClusterAccess, err := virtualcluster.InitializeAccess(scheme.Scheme, binaryAssetsDir, map[string]string{
 		//		"secure-port": apiServerPort, <--TODO: this DOESN'T work..ask maddy on envtest port config
-		"max-mutating-requests-inflight": "500",
-		"max-requests-inflight":          "500",
+		//"max-mutating-requests-inflight": "500",
+		//"max-requests-inflight":          "500",
 	})
 	if err != nil {
 		slog.Error("cannot initialize virtual cluster", "error", err)

@@ -18,7 +18,9 @@ func SetupSSEWriter(w http.ResponseWriter) {
 }
 
 func Log(w http.ResponseWriter, msg string) {
-	fmt.Fprintf(w, "[ %s ] : %s\n", time.Now().Format("2006-01-02 15:04:05"), msg)
+	if _, err := fmt.Fprintf(w, "[ %s ] : %s\n", time.Now().Format("2006-01-02 15:04:05"), msg); err != nil {
+		slog.Error("cannot write to response writer", "msg", msg, "error", err)
+	}
 	w.(http.Flusher).Flush()
 }
 
