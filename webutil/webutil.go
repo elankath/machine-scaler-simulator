@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	scalesim "github.com/elankath/scaler-simulator"
@@ -15,6 +16,23 @@ func SetupSSEWriter(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+}
+
+type Logger struct {
+	mu sync.Mutex
+}
+
+func NewLogger() *Logger {
+	return &Logger{}
+}
+
+func (l *Logger) Log(w http.ResponseWriter, msg string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if _, err := fmt.Fprintf(w, "[ %s ] : %s\n", time.Now().Format("2006-01-02 15:04:05"), msg); err != nil {
+		slog.Error("cannot write to response writer", "msg", msg, "error", err)
+	}
+	w.(http.Flusher).Flush()
 }
 
 func Log(w http.ResponseWriter, msg string) {

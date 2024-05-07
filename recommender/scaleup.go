@@ -346,31 +346,31 @@ func (r *Recommender) syncRecommenderStateWithWinningResult(ctx context.Context,
 
 func (r *Recommender) triggerNodePoolSimulations(ctx context.Context, resultCh chan runResult, runNum int) {
 	wg := &sync.WaitGroup{}
-	webutil.Log(r.logWriter, fmt.Sprintf("Starting simulation runs for %v nodePools", maps.Keys(r.state.eligibleNodePools)))
+	logger := webutil.NewLogger()
+	logger.Log(r.logWriter, fmt.Sprintf("Starting simulation runs for %v nodePools", maps.Keys(r.state.eligibleNodePools)))
 	for _, nodePool := range r.state.eligibleNodePools {
 		wg.Add(1)
 		runRef := simRunRef{
 			key:   "app.kubernetes.io/simulation-run",
 			value: nodePool.Name + "-" + strconv.Itoa(runNum),
 		}
-		webutil.Log(r.logWriter, fmt.Sprintf("Triggering simulation run: %v for nodePool: %s", runRef, nodePool.Name))
-		go r.runSimulationForNodePool(ctx, wg, nodePool, resultCh, runRef)
+		go r.runSimulationForNodePool(ctx, logger, wg, nodePool, resultCh, runRef)
 	}
 	wg.Wait()
 	close(resultCh)
 }
 
-func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.WaitGroup, nodePool scalesim.NodePool, resultCh chan runResult, runRef simRunRef) {
+func (r *Recommender) runSimulationForNodePool(ctx context.Context, logger *webutil.Logger, wg *sync.WaitGroup, nodePool scalesim.NodePool, resultCh chan runResult, runRef simRunRef) {
 	simRunStartTime := time.Now()
 	defer wg.Done()
 	defer func() {
-		webutil.Log(r.logWriter, fmt.Sprintf("Simulation run: %s for nodePool: %s completed in %f seconds", runRef.value, nodePool.Name, time.Since(simRunStartTime).Seconds()))
+		logger.Log(r.logWriter, fmt.Sprintf("Simulation run: %s for nodePool: %s completed in %f seconds", runRef.value, nodePool.Name, time.Since(simRunStartTime).Seconds()))
 	}()
 	defer func() {
 		if err := r.cleanUpNodePoolSimRun(ctx, runRef); err != nil {
 			// In the productive code, there will not be any real KAPI and ETCD. Fake API server will never return an error as everything will be in memory.
 			// For now, we are only logging this error as in the POC code since the caller of recommender will re-initialize the virtual cluster.
-			webutil.Log(r.logWriter, "Error cleaning up simulation run: "+runRef.value+" err: "+err.Error())
+			logger.Log(r.logWriter, "Error cleaning up simulation run: "+runRef.value+" err: "+err.Error())
 		}
 	}()
 
@@ -378,9 +378,7 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, wg *sync.Wai
 		node *corev1.Node
 		err  error
 	)
-	slog.Info("Simulation Run", "run-no", runRef.value, "node-pool", nodePool.Name, "num-zones", len(nodePool.Zones))
 	for _, zone := range nodePool.Zones {
-		webutil.Log(r.logWriter, fmt.Sprintf("Starting simulation run: %s for nodePool: %s in zone: %s", runRef.value, nodePool.Name, zone))
 		if node != nil {
 			if err = r.resetNodePoolSimRun(ctx, node.Name, runRef); err != nil {
 				resultCh <- createErrorResult(err)

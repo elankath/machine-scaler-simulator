@@ -141,7 +141,8 @@ loop:
 					unscheduledPodNames.Delete(event.InvolvedObject.Name)
 				}
 			}
-			webutil.Log(w, fmt.Sprintf("Scheduled Pods: %d, Unscheduled Pods: %d, Total Pods : %d", len(scheduledPodNames), len(unscheduledPodNames), len(pods)))
+			//webutil.Log(w, fmt.Sprintf("Scheduled Pods: %d, Unscheduled Pods: %d, Total Pods : %d", len(scheduledPodNames), len(unscheduledPodNames), len(pods)))
+			slog.Info("Scheduled Pods: %d, Unscheduled Pods: %d, Total Pods : %d", len(scheduledPodNames), len(unscheduledPodNames), len(pods))
 			if len(scheduledPodNames)+len(unscheduledPodNames) == len(pods) {
 				break loop
 			}
