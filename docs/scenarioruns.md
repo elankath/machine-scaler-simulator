@@ -3,6 +3,7 @@
 #### Case 1 (case-up-3)
 
 `curl -XPOST 'localhost:8080/scenarios/score4?small=20&large=0&leastWaste=1.0&leastCost=1.0&shoot=case-up-3'`
+`curl -XPOST 'localhost:8080/scenarios/score5?small=20&large=0&leastWaste=1.0&leastCost=1.0&shoot=case-up-3'`
 
 ```
 (single zone workerpool)
@@ -26,6 +27,7 @@ NG1:= (1/9)*(19/20) + 3/8 = 0.480
 #### Case 2 (case-up-2)
 
  `curl -XPOST 'localhost:8080/scenarios/score4?small=10&large=1&leastWaste=1.0&leastCost=1.0&shoot=case-up-2&podOrder=desc'`
+ `curl -XPOST 'localhost:8080/scenarios/score5?small=10&large=1&leastWaste=1.0&leastCost=1.0&shoot=case-up-2&podOrder=desc'`
 
 ```
 (single zone workerpool)
@@ -62,6 +64,7 @@ NG1 wins!!
 #### Case 3 (case-up-3)
 
 `curl -XPOST 'localhost:8080/scenarios/score4?small=11&large=1&leastWaste=1.0&leastCost=1.0&shoot=case-up-3&podOrder=desc'`
+`curl -XPOST 'localhost:8080/scenarios/score5?small=11&large=1&leastWaste=1.0&leastCost=1.0&shoot=case-up-3&podOrder=desc'`
 
 ```
 (single zone workerpool)
@@ -102,10 +105,12 @@ Result of using ksc+algo (lW = 1,lC = 1, pd = desc) -> 3 * NG1 + 4 * NG2 + 1 * N
 Result of using ksc+algo (lW = 1,lC = 1.5,pd = none) -> 3 * NG1 + 4 * NG2 + 1 * NG3 
 Result of using ksc+algo (lW = 1,lC = 1.5,pd = desc) -> 3 * NG1 + 4 * NG2 + 1 * NG3 
 
-Result of using ksc+newAlgo(least waste(capacity and not allocatable) + cost * unscheduled) ->  3 * NG1, 3 * NG2, 1 * NG3
+Result of using ksc+newAlgo(least waste(capacity and not allocatable) + cost * unscheduled) ->  3 * NG1, 4 * NG2, 1 * NG3
 ```
 
 ####  Case 5 (case-up-5)
+
+`curl -XPOST 'localhost:8080/scenarios/score5?small=15&large=0&leastWaste=1.0&leastCost=1.0&shoot=case-up-5'`
 
 ```
 PodA : 3Gb -> 15Repl

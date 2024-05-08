@@ -82,12 +82,17 @@ type nodeScore struct {
 
 type runResult struct {
 	nodePoolName    string
+	nodeName        string
 	zone            string
 	instanceType    string
 	nodeScore       nodeScore
 	unscheduledPods []corev1.Pod
 	nodeToPods      map[string][]types.NamespacedName
 	err             error
+}
+
+func (r runResult) HasWinner() bool {
+	return len(r.nodeToPods) > 0
 }
 
 type simRunRef struct {
@@ -264,7 +269,9 @@ func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommend
 		if result.err != nil {
 			errs = errors.Join(errs, result.err)
 		} else {
-			results = append(results, result)
+			if result.HasWinner() {
+				results = append(results, result)
+			}
 		}
 	}
 	if errs != nil {
@@ -272,7 +279,7 @@ func (r *Recommender) runSimulation(ctx context.Context, runNum int) (*Recommend
 	}
 
 	recommendation, winnerRunResult := getWinner(results)
-	return &recommendation, &winnerRunResult, nil
+	return recommendation, &winnerRunResult, nil
 }
 
 func (r *Recommender) syncWinningResult(ctx context.Context, recommendation *Recommendation, winningRunResult *runResult) error {
@@ -280,48 +287,49 @@ func (r *Recommender) syncWinningResult(ctx context.Context, recommendation *Rec
 	defer func() {
 		webutil.Log(r.logWriter, fmt.Sprintf("syncWinningResult for nodePool: %s completed in %f seconds", recommendation.nodePoolName, time.Since(startTime).Seconds()))
 	}()
-	winningNodeName, scheduledPodNames, err := r.syncClusterWithWinningResult(ctx, winningRunResult)
+	scheduledPodNames, err := r.syncClusterWithWinningResult(ctx, winningRunResult)
 	if err != nil {
 		return err
 	}
-	return r.syncRecommenderStateWithWinningResult(ctx, recommendation, winningNodeName, scheduledPodNames)
+	return r.syncRecommenderStateWithWinningResult(ctx, recommendation, winningRunResult.nodeName, scheduledPodNames)
 }
 
-func (r *Recommender) syncClusterWithWinningResult(ctx context.Context, winningRunResult *runResult) (string, []string, error) {
+func (r *Recommender) syncClusterWithWinningResult(ctx context.Context, winningRunResult *runResult) ([]string, error) {
 	node, err := r.constructNodeFromExistingNodeOfInstanceType(winningRunResult.instanceType, winningRunResult.nodePoolName, winningRunResult.zone, false, nil)
 	if err != nil {
-		return "", nil, err
+		return nil, err
 	}
+	node.Name = winningRunResult.nodeName
 	var originalPods []corev1.Pod
 	var scheduledPods []corev1.Pod
-	for _, simPodObjectKeys := range winningRunResult.nodeToPods {
+	for nodeName, simPodObjectKeys := range winningRunResult.nodeToPods {
 		for _, simPodObjectKey := range simPodObjectKeys {
 			podName := toOriginalResourceName(simPodObjectKey.Name)
 			pod, err := r.engine.VirtualClusterAccess().GetPod(ctx, types.NamespacedName{Name: podName, Namespace: simPodObjectKey.Namespace})
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
 			originalPods = append(originalPods, *pod)
 			podCopy := pod.DeepCopy()
-			podCopy.Spec.NodeName = node.Name
+			podCopy.Spec.NodeName = toOriginalResourceName(nodeName)
 			podCopy.ObjectMeta.ResourceVersion = ""
 			podCopy.ObjectMeta.CreationTimestamp = metav1.Time{}
 			scheduledPods = append(scheduledPods, *podCopy)
 		}
 	}
 	if err := r.engine.VirtualClusterAccess().DeletePods(ctx, originalPods...); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err = r.engine.VirtualClusterAccess().AddPods(ctx, scheduledPods...); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err = r.engine.VirtualClusterAccess().AddNodesAndUpdateLabels(ctx, node); err != nil {
-		return "", nil, err
+		return nil, err
 	}
 	if err = r.engine.VirtualClusterAccess().RemoveTaintFromVirtualNode(ctx, node.Name, "node.kubernetes.io/not-ready"); err != nil {
-		return "", nil, err
+		return nil, err
 	}
-	return node.Name, simutil.PodNames(scheduledPods), nil
+	return simutil.PodNames(scheduledPods), nil
 }
 
 func (r *Recommender) syncRecommenderStateWithWinningResult(ctx context.Context, recommendation *Recommendation, winningNodeName string, scheduledPodNames []string) error {
@@ -419,7 +427,7 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, logger *webu
 			return
 		}
 		ns := r.computeNodeScore(node, simRunCandidatePods)
-		resultCh <- r.computeRunResult(nodePool.Name, nodePool.MachineType, zone, ns, simRunCandidatePods)
+		resultCh <- r.computeRunResult(nodePool.Name, nodePool.MachineType, zone, node.Name, ns, simRunCandidatePods)
 	}
 }
 
@@ -456,9 +464,12 @@ func (r *Recommender) setupSimulationRun(ctx context.Context, runRef simRunRef) 
 			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
 		}
 		if len(podCopy.Spec.TopologySpreadConstraints) > 0 {
+			updatedTSC := make([]corev1.TopologySpreadConstraint, 0, len(podCopy.Spec.TopologySpreadConstraints))
 			for _, tsc := range podCopy.Spec.TopologySpreadConstraints {
 				tsc.LabelSelector.MatchLabels[runRef.key] = runRef.value
+				updatedTSC = append(updatedTSC, tsc)
 			}
+			podCopy.Spec.TopologySpreadConstraints = updatedTSC
 		}
 		podCopy.Spec.NodeName = fromOriginalResourceName(podCopy.Spec.NodeName, runRef.value)
 		clonedScheduledPods = append(clonedScheduledPods, *podCopy)
@@ -496,7 +507,7 @@ func (r *Recommender) constructNodeFromExistingNodeOfInstanceType(instanceType, 
 	var nodeName string
 	taints := make([]corev1.Taint, 0, 1)
 	if forSimRun {
-		nodeName = nodeNamePrefix + "-simrun-" + runRef.value
+		nodeName = nodeNamePrefix + "-" + poolName + "-simrun-" + runRef.value
 		nodeLabels[runRef.key] = runRef.value
 		taints = append(taints, corev1.Taint{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule})
 	} else {
@@ -535,13 +546,24 @@ func (r *Recommender) createAndDeployUnscheduledPods(ctx context.Context, runRef
 		podCopy.Spec.Tolerations = []corev1.Toleration{
 			{Key: runRef.key, Value: runRef.value, Effect: corev1.TaintEffectNoSchedule, Operator: corev1.TolerationOpEqual},
 		}
+		if len(podCopy.Spec.TopologySpreadConstraints) > 0 {
+			updatedTSC := make([]corev1.TopologySpreadConstraint, 0, len(podCopy.Spec.TopologySpreadConstraints))
+			for _, tsc := range podCopy.Spec.TopologySpreadConstraints {
+				tsc.LabelSelector.MatchLabels[runRef.key] = runRef.value
+				updatedTSC = append(updatedTSC, tsc)
+			}
+			podCopy.Spec.TopologySpreadConstraints = updatedTSC
+		}
 		podCopy.Spec.SchedulerName = virtualcluster.BinPackingSchedulerName
 		unscheduledPodList = append(unscheduledPodList, *podCopy)
 	}
 	return unscheduledPodList, r.engine.VirtualClusterAccess().AddPods(ctx, unscheduledPodList...)
 }
 
-func (r *Recommender) computeRunResult(nodePoolName, instanceType, zone string, score nodeScore, pods []corev1.Pod) runResult {
+func (r *Recommender) computeRunResult(nodePoolName, instanceType, zone, nodeName string, score nodeScore, pods []corev1.Pod) runResult {
+	if score.unscheduledRatio == 1.0 {
+		return runResult{}
+	}
 	unscheduledPods := make([]corev1.Pod, 0, len(pods))
 	nodeToPods := make(map[string][]types.NamespacedName)
 	for _, pod := range pods {
@@ -553,6 +575,7 @@ func (r *Recommender) computeRunResult(nodePoolName, instanceType, zone string, 
 	}
 	return runResult{
 		nodePoolName:    nodePoolName,
+		nodeName:        toOriginalResourceName(nodeName),
 		zone:            zone,
 		instanceType:    instanceType,
 		nodeScore:       score,
@@ -581,7 +604,10 @@ func (r *Recommender) cleanUpNodePoolSimRun(ctx context.Context, runRef simRunRe
 	return err
 }
 
-func getWinner(results []runResult) (Recommendation, runResult) {
+func getWinner(results []runResult) (*Recommendation, runResult) {
+	if len(results) == 0 {
+		return nil, runResult{}
+	}
 	var winner runResult
 	minScore := math.MaxFloat64
 	var winningRunResults []runResult
@@ -599,7 +625,7 @@ func getWinner(results []runResult) (Recommendation, runResult) {
 	rand.Seed(uint64(time.Now().UnixNano()))
 	winningIndex := rand.Intn(len(winningRunResults))
 	winner = winningRunResults[winningIndex]
-	return Recommendation{
+	return &Recommendation{
 		zone:         winner.zone,
 		nodePoolName: winner.nodePoolName,
 		incrementBy:  int32(1),
