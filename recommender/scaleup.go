@@ -65,7 +65,7 @@ type Recommendation struct {
 type Recommender struct {
 	engine                 scalesim.Engine
 	scenarioName           string
-	shootName              string
+	shoot                  *v1beta1.Shoot
 	strategyWeights        StrategyWeights
 	logWriter              http.ResponseWriter
 	state                  simulationState
@@ -107,6 +107,7 @@ func (s simRunRef) asMap() map[string]string {
 }
 
 type simulationState struct {
+	originalPods    map[string]corev1.Pod
 	existingNodes   []corev1.Node
 	unscheduledPods []corev1.Pod
 	scheduledPods   []corev1.Pod
@@ -127,32 +128,25 @@ func (s *simulationState) updateEligibleNodePools(recommendation *Recommendation
 	}
 }
 
-func NewRecommender(engine scalesim.Engine, scenarioName, shootName, podOrder string, strategyWeights StrategyWeights, logWriter http.ResponseWriter) *Recommender {
+func NewRecommender(engine scalesim.Engine, scenarioName, podOrder string, shoot *v1beta1.Shoot, instanceTypeCostRatios map[string]float64, strategyWeights StrategyWeights, logWriter http.ResponseWriter) *Recommender {
 	return &Recommender{
 		engine:                 engine,
 		scenarioName:           scenarioName,
-		shootName:              shootName,
+		shoot:                  shoot,
 		strategyWeights:        strategyWeights,
 		logWriter:              logWriter,
-		instanceTypeCostRatios: make(map[string]float64),
+		instanceTypeCostRatios: instanceTypeCostRatios,
 		podOrder:               podOrder,
 	}
 }
 
-func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
+func (r *Recommender) Run(ctx context.Context, unscheduledPods []corev1.Pod) ([]Recommendation, error) {
 	var (
 		recommendations []Recommendation
 		runNumber       int
 	)
 
-	shoot, err := r.getShoot()
-	if err != nil {
-		webutil.InternalError(r.logWriter, err)
-		return recommendations, err
-	}
-
-	r.computeCostRatiosForInstanceTypes(shoot.Spec.Provider.Workers)
-	if err = r.initializeSimulationState(ctx, shoot); err != nil {
+	if err := r.initializeSimulationState(ctx, r.shoot, unscheduledPods); err != nil {
 		webutil.InternalError(r.logWriter, err)
 		return recommendations, err
 	}
@@ -168,7 +162,7 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 		recommendation, winnerRunResult, err := r.runSimulation(ctx, runNumber)
 		webutil.Log(r.logWriter, fmt.Sprintf("scale-up recommender run #%d completed in %f seconds", runNumber, time.Since(simRunStartTime).Seconds()))
 		if err != nil {
-			webutil.Log(r.logWriter, fmt.Sprintf("runSimulation for shoot %s failed, err: %v", shoot.Name, err))
+			webutil.Log(r.logWriter, fmt.Sprintf("runSimulation for shoot %s failed, err: %v", r.shoot.Name, err))
 			break
 		}
 
@@ -186,7 +180,7 @@ func (r *Recommender) Run(ctx context.Context) ([]Recommendation, error) {
 }
 
 func (r *Recommender) getShoot() (*v1beta1.Shoot, error) {
-	shoot, err := r.engine.ShootAccess(r.shootName).GetShootObj()
+	shoot, err := r.engine.ShootAccess(r.shoot.Name).GetShootObj()
 	if err != nil {
 		return nil, err
 	}
@@ -203,12 +197,11 @@ func (r *Recommender) computeCostRatiosForInstanceTypes(workerPools []v1beta1.Wo
 	}
 }
 
-func (r *Recommender) initializeSimulationState(ctx context.Context, shoot *v1beta1.Shoot) error {
-	unscheduledPods, err := r.engine.VirtualClusterAccess().ListPods(ctx)
-	if err != nil {
-		return err
-	}
+func (r *Recommender) initializeSimulationState(ctx context.Context, shoot *v1beta1.Shoot, unscheduledPods []corev1.Pod) error {
 	r.state.unscheduledPods = unscheduledPods
+	r.state.originalPods = lo.SliceToMap[corev1.Pod, string, corev1.Pod](unscheduledPods, func(item corev1.Pod) (string, corev1.Pod) {
+		return item.Name, item
+	})
 	return r.initializeEligibleNodePools(ctx, shoot)
 }
 
@@ -305,20 +298,17 @@ func (r *Recommender) syncClusterWithWinningResult(ctx context.Context, winningR
 	for nodeName, simPodObjectKeys := range winningRunResult.nodeToPods {
 		for _, simPodObjectKey := range simPodObjectKeys {
 			podName := toOriginalResourceName(simPodObjectKey.Name)
-			pod, err := r.engine.VirtualClusterAccess().GetPod(ctx, types.NamespacedName{Name: podName, Namespace: simPodObjectKey.Namespace})
-			if err != nil {
-				return nil, err
+			pod, ok := r.state.originalPods[podName]
+			if !ok {
+				return nil, fmt.Errorf("unexpected error, pod: %s not found in the original pods collection", podName)
 			}
-			originalPods = append(originalPods, *pod)
+			originalPods = append(originalPods, pod)
 			podCopy := pod.DeepCopy()
 			podCopy.Spec.NodeName = toOriginalResourceName(nodeName)
 			podCopy.ObjectMeta.ResourceVersion = ""
 			podCopy.ObjectMeta.CreationTimestamp = metav1.Time{}
 			scheduledPods = append(scheduledPods, *podCopy)
 		}
-	}
-	if err := r.engine.VirtualClusterAccess().DeletePods(ctx, originalPods...); err != nil {
-		return nil, err
 	}
 	if err = r.engine.VirtualClusterAccess().AddPods(ctx, scheduledPods...); err != nil {
 		return nil, err

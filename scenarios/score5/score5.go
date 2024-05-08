@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/elankath/scaler-simulator/pricing"
 	"github.com/elankath/scaler-simulator/recommender"
+	"github.com/gardener/gardener/pkg/apis/core/v1beta1"
+	"github.com/samber/lo"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/simutil"
@@ -118,23 +121,26 @@ func (s *scenarioscore5) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		allPods = append(allPods, largePods...)
 	}
 
-	if err = s.engine.VirtualClusterAccess().CreatePods(r.Context(), podOrder, allPods...); err != nil {
-		webutil.Log(w, "Execution of scenario: "+scenarioName+" completed with error: "+err.Error())
-		return
-	}
 	if err = s.engine.VirtualClusterAccess().InitializeReferenceNodes(r.Context()); err != nil {
 		webutil.Log(w, "Execution of scenario: "+scenarioName+" completed with error: "+err.Error())
 		return
 	}
 
-	reco := recommender.NewRecommender(s.engine, scenarioName, shootName, podOrder, recommender.StrategyWeights{
+	shoot, err := s.engine.ShootAccess(shootName).GetShootObj()
+	if err != nil {
+		webutil.Log(w, "Execution of scenario: "+scenarioName+" completed with error: "+err.Error())
+		return
+	}
+
+	instanceTypeCostRatios := computeCostRatiosForInstanceTypes(shoot.Spec.Provider.Workers)
+	reco := recommender.NewRecommender(s.engine, scenarioName, podOrder, shoot, instanceTypeCostRatios, recommender.StrategyWeights{
 		LeastWaste: leastWasteWeight,
 		LeastCost:  leastCostWeight,
 	}, w)
 
 	startTime := time.Now()
 
-	recommendation, err := reco.Run(context.Background())
+	recommendation, err := reco.Run(context.Background(), allPods)
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		return
@@ -156,6 +162,18 @@ func (s scenarioscore5) ShootName() string {
 
 func (s scenarioscore5) Name() string {
 	return scenarioName
+}
+
+func computeCostRatiosForInstanceTypes(workerPools []v1beta1.Worker) map[string]float64 {
+	instanceTypeCostRatios := make(map[string]float64)
+	totalCost := lo.Reduce[v1beta1.Worker, float64](workerPools, func(totalCost float64, pool v1beta1.Worker, _ int) float64 {
+		return totalCost + pricing.GetPricing(pool.Machine.Type)
+	}, 0.0)
+	for _, pool := range workerPools {
+		price := pricing.GetPricing(pool.Machine.Type)
+		instanceTypeCostRatios[pool.Machine.Type] = price / totalCost
+	}
+	return instanceTypeCostRatios
 }
 
 func constructPodsWithTSC(namePrefix string, schedulerName string, nodeName string, memRequest, cpuRequest string, count int, topologyKey *string, maxSkew *int, matchingTSCLabels map[string]string, labels map[string]string) ([]corev1.Pod, error) {

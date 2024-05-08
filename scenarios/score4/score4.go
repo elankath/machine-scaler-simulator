@@ -3,6 +3,7 @@ package score4
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	scalesim "github.com/elankath/scaler-simulator"
 	"github.com/elankath/scaler-simulator/nodescorer"
@@ -125,11 +126,15 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		webutil.InternalError(w, err)
 		return
 	}
+
+	startTime := time.Now()
 	recommendation, err := recommender.Run(r.Context(), shoot, allPods)
 	if err != nil {
 		webutil.Log(w, "Execution of scenario: "+s.Name()+" completed with error: "+err.Error())
 		return
+
 	}
+	webutil.Log(w, fmt.Sprintf("Execution of scenario: %s completed in %f seconds", scenarioName, time.Since(startTime).Seconds()))
 	webutil.Log(w, fmt.Sprintf("Recommendation: %s", recommendation.String()))
 	webutil.Log(w, fmt.Sprintf("Scenario-%s Completed!", s.Name()))
 }
