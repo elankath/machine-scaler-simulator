@@ -313,7 +313,7 @@ func (r *Recommender) syncClusterWithWinningResult(ctx context.Context, winningR
 	if err = r.engine.VirtualClusterAccess().AddPods(ctx, scheduledPods...); err != nil {
 		return nil, err
 	}
-	if err = r.engine.VirtualClusterAccess().AddNodesAndUpdateLabels(ctx, node); err != nil {
+	if err = r.engine.VirtualClusterAccess().AddNodes(ctx, node); err != nil {
 		return nil, err
 	}
 	if err = r.engine.VirtualClusterAccess().RemoveTaintFromVirtualNode(ctx, node.Name, "node.kubernetes.io/not-ready"); err != nil {
@@ -392,7 +392,7 @@ func (r *Recommender) runSimulationForNodePool(ctx context.Context, logger *webu
 			resultCh <- createErrorResult(err)
 			return
 		}
-		if err = r.engine.VirtualClusterAccess().AddNodesAndUpdateLabels(ctx, node); err != nil {
+		if err = r.engine.VirtualClusterAccess().AddNodes(ctx, node); err != nil {
 			resultCh <- createErrorResult(err)
 			return
 		}

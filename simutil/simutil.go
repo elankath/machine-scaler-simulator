@@ -105,6 +105,10 @@ func PrintScheduledPodEvents(ctx context.Context, a scalesim.VirtualClusterAcces
 }
 
 func WaitForAndRecordPodSchedulingEvents(ctx context.Context, vca scalesim.VirtualClusterAccess, w http.ResponseWriter, since time.Time, pods []corev1.Pod, timeout time.Duration) (scheduledPodNames sets.Set[string], unscheduledPodNames sets.Set[string], err error) {
+	startTime := time.Now()
+	defer func() {
+		slog.Info(fmt.Sprintf("#WaitForAndRecordPodSchedulingEvents took %f seconds", time.Since(startTime).Seconds()))
+	}()
 	tick := time.NewTicker(timeout)
 	defer tick.Stop()
 	pollTick := time.NewTicker(100 * time.Millisecond)
