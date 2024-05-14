@@ -13,5 +13,5 @@ spec:
       image: registry.k8s.io/pause:3.5
       resources:
         requests:
-          cpu: 200m
+          cpu: 2000m
           memory: 12Gi

@@ -205,7 +205,8 @@ func (s ScalerRecommendations) String() string {
 type NodeRunResult struct {
 	NodeName         string
 	Pool             *gardencore.Worker
-	WasteRatio       float64
+	MemoryWasteRatio float64
+	CPUWasteRatio    float64
 	UnscheduledRatio float64
 	CostRatio        float64
 	CumulativeScore  float64
@@ -215,7 +216,7 @@ type NodeRunResult struct {
 }
 
 func (n NodeRunResult) String() string {
-	return fmt.Sprintf("(Worker: %s, WasteRatio: %.4f, UnscheduledRatio: %.4f, CostRatio: %.4f, CumulativeScore: %.4f, NumAssignedPodsToNode: %d, NumAssignedPodsTotal: %d)", n.Pool.Name, n.WasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore, n.NumAssignedPodsToNode, n.NumAssignedPodsTotal)
+	return fmt.Sprintf("(Worker: %s, MemoryWasteRatio: %.4f, CPUWasteRatio: %.4f, UnscheduledRatio: %.4f, CostRatio: %.4f, CumulativeScore: %.4f, NumAssignedPodsToNode: %d, NumAssignedPodsTotal: %d)", n.Pool.Name, n.MemoryWasteRatio, n.CPUWasteRatio, n.UnscheduledRatio, n.CostRatio, n.CumulativeScore, n.NumAssignedPodsToNode, n.NumAssignedPodsTotal)
 }
 
 type AllPricing struct {

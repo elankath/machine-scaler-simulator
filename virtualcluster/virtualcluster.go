@@ -93,10 +93,66 @@ func (a *access) DeleteNodesWithMatchingLabels(ctx context.Context, labels map[s
 
 func (a *access) CreatePods(ctx context.Context, podOrder string, pods ...corev1.Pod) error {
 	if podOrder == "desc" {
+		slog.Info("SORT")
+		totalMemoryRequested := int64(0)
+		totalCPURequested := int64(0)
+		for _, pod := range pods {
+			for _, container := range pod.Spec.Containers {
+				containerResources, ok := container.Resources.Requests[corev1.ResourceMemory]
+				if ok {
+					totalMemoryRequested += containerResources.MilliValue()
+				}
+				containerResources, ok = container.Resources.Requests[corev1.ResourceCPU]
+				if ok {
+					totalCPURequested += containerResources.MilliValue()
+				}
+			}
+		}
 		//TODO: include other resources for sorting
-		slices.SortFunc(pods, func(i, j corev1.Pod) int {
-			return -i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
-		})
+		if totalMemoryRequested != 0 && totalCPURequested != 0 {
+			slices.SortFunc(pods, func(i, j corev1.Pod) int {
+				//return -i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
+				podIMemRequest := int64(0)
+				podICPURequest := int64(0)
+				podJMemRequest := int64(0)
+				podJCPURequest := int64(0)
+
+				//Pod i requests
+				for _, container := range i.Spec.Containers {
+					containerResources, ok := container.Resources.Requests[corev1.ResourceMemory]
+					if ok {
+						podIMemRequest += containerResources.MilliValue()
+					}
+					containerResources, ok = container.Resources.Requests[corev1.ResourceCPU]
+					if ok {
+						podICPURequest += containerResources.MilliValue()
+					}
+				}
+				//Pod j requests
+				for _, container := range j.Spec.Containers {
+					containerResources, ok := container.Resources.Requests[corev1.ResourceMemory]
+					if ok {
+						podJMemRequest += containerResources.MilliValue()
+					}
+					containerResources, ok = container.Resources.Requests[corev1.ResourceCPU]
+					if ok {
+						podJCPURequest += containerResources.MilliValue()
+					}
+				}
+
+				// Divide by 2 really needed here?
+				podIRequest := ((float64(podIMemRequest) / float64(totalMemoryRequested)) + (float64(podICPURequest) / float64(totalCPURequested))) / 2
+				podJRequest := ((float64(podJMemRequest) / float64(totalMemoryRequested)) + (float64(podJCPURequest) / float64(totalCPURequested))) / 2
+
+				if podIRequest < podJRequest {
+					return 1
+				} else if podIRequest > podJRequest {
+					return -1
+				} else {
+					return 0
+				}
+			})
+		}
 	}
 	for _, pod := range pods {
 		clone := pod.DeepCopy()

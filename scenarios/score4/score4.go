@@ -82,7 +82,7 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		matchingTSCLabels := map[string]string{
 			"foo": "bar",
 		}
-		smallPods, err := constructPodsWithTSC("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount, &topologyKeyForZone, &maxSkew, matchingTSCLabels, smallPodLabels)
+		smallPods, err := constructPodsWithTSC("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "1000m", smallCount, &topologyKeyForZone, &maxSkew, matchingTSCLabels, smallPodLabels)
 		if err != nil {
 			webutil.InternalError(w, err)
 			return
@@ -91,7 +91,7 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		matchingTSCLabels = map[string]string{
 			"foo": "bar2",
 		}
-		largePods, err := constructPodsWithTSC("large", virtualcluster.BinPackingSchedulerName, "", "12Gi", "200m", largeCount, &topologyKeyForHostname, &maxSkew, matchingTSCLabels, largePodLabels)
+		largePods, err := constructPodsWithTSC("large", virtualcluster.BinPackingSchedulerName, "", "12Gi", "2000m", largeCount, &topologyKeyForHostname, &maxSkew, matchingTSCLabels, largePodLabels)
 		if err != nil {
 			webutil.InternalError(w, err)
 			return
@@ -100,14 +100,14 @@ func (s *scenarioscore4) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		allPods = append(allPods, largePods...)
 	} else {
 		delete(smallPodLabels, "foo")
-		smallPods, err := constructPodsWithoutTSC("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "100m", smallCount, smallPodLabels)
+		smallPods, err := constructPodsWithoutTSC("small", virtualcluster.BinPackingSchedulerName, "", "5Gi", "1000m", smallCount, smallPodLabels)
 		if err != nil {
 			webutil.InternalError(w, err)
 			return
 		}
 
 		delete(largePodLabels, "foo")
-		largePods, err := constructPodsWithoutTSC("large", virtualcluster.BinPackingSchedulerName, "", "12Gi", "200m", largeCount, largePodLabels)
+		largePods, err := constructPodsWithoutTSC("large", virtualcluster.BinPackingSchedulerName, "", "12Gi", "2000m", largeCount, largePodLabels)
 		if err != nil {
 			webutil.InternalError(w, err)
 			return

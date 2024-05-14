@@ -74,7 +74,8 @@ type Recommender struct {
 }
 
 type nodeScore struct {
-	wasteRatio       float64
+	memoryWasteRatio float64
+	cpuWasteRatio    float64
 	unscheduledRatio float64
 	costRatio        float64
 	cumulativeScore  float64
@@ -576,11 +577,13 @@ func (r *Recommender) computeRunResult(nodePoolName, instanceType, zone, nodeNam
 
 func (r *Recommender) computeNodeScore(scaledNode *corev1.Node, candidatePods []corev1.Pod) nodeScore {
 	costRatio := r.strategyWeights.LeastCost * r.instanceTypeCostRatios[scaledNode.Labels["node.kubernetes.io/instance-type"]]
-	wasteRatio := r.strategyWeights.LeastWaste * computeWasteRatio(scaledNode, candidatePods)
+	memoryWasteRatio := r.strategyWeights.LeastWaste * computeMemoryWasteRatio(scaledNode, candidatePods)
+	cpuWasteRatio := r.strategyWeights.LeastWaste + computeCPUWasteRatio(scaledNode, candidatePods) //Using the same `LeastWaste` weight. Should we consider having different weights for different resources?
 	unscheduledRatio := computeUnscheduledRatio(candidatePods)
-	cumulativeScore := wasteRatio + unscheduledRatio*costRatio
+	cumulativeScore := ((memoryWasteRatio + cpuWasteRatio) / 2) + unscheduledRatio*costRatio
 	return nodeScore{
-		wasteRatio:       wasteRatio,
+		memoryWasteRatio: memoryWasteRatio,
+		cpuWasteRatio:    cpuWasteRatio,
 		unscheduledRatio: unscheduledRatio,
 		costRatio:        costRatio,
 		cumulativeScore:  cumulativeScore,
@@ -643,22 +646,48 @@ func computeUnscheduledRatio(candidatePods []corev1.Pod) float64 {
 	return float64(len(candidatePods)-totalAssignedPods) / float64(len(candidatePods))
 }
 
-func computeWasteRatio(node *corev1.Node, candidatePods []corev1.Pod) float64 {
+func computeMemoryWasteRatio(node *corev1.Node, candidatePods []corev1.Pod) float64 {
 	var (
-		targetNodeAssignedPods []corev1.Pod
-		totalMemoryConsumed    int64
+		//targetNodeAssignedPods []corev1.Pod
+		totalMemoryConsumed int64
 	)
 	for _, pod := range candidatePods {
 		if pod.Spec.NodeName == node.Name {
-			targetNodeAssignedPods = append(targetNodeAssignedPods, pod)
+			//targetNodeAssignedPods = append(targetNodeAssignedPods, pod)
+			var podMemoryConsumed int64
 			for _, container := range pod.Spec.Containers {
-				totalMemoryConsumed += container.Resources.Requests.Memory().MilliValue()
+				containerResources, ok := container.Resources.Requests[corev1.ResourceMemory]
+				if ok {
+					podMemoryConsumed += containerResources.MilliValue()
+				}
 			}
-			slog.Info("NodPodAssignment: ", "pod", pod.Name, "node", pod.Spec.NodeName, "memory", pod.Spec.Containers[0].Resources.Requests.Memory().MilliValue())
+			slog.Info("NodPodAssignment: ", "pod", pod.Name, "node", pod.Spec.NodeName, "memory", podMemoryConsumed)
+			totalMemoryConsumed += podMemoryConsumed
 		}
 	}
 	totalMemoryCapacity := node.Status.Capacity.Memory().MilliValue()
 	return float64(totalMemoryCapacity-totalMemoryConsumed) / float64(totalMemoryCapacity)
+}
+
+func computeCPUWasteRatio(node *corev1.Node, candidatePods []corev1.Pod) float64 {
+	var (
+		totalCPUUsage int64
+	)
+	for _, pod := range candidatePods {
+		if pod.Spec.NodeName == node.Name {
+			var podCPUUsage int64
+			for _, container := range pod.Spec.Containers {
+				containerResources, ok := container.Resources.Requests[corev1.ResourceCPU]
+				if ok {
+					podCPUUsage += containerResources.MilliValue()
+				}
+			}
+			slog.Info("NodPodAssignment: ", "pod", pod.Name, "node", pod.Spec.NodeName, "cpu", podCPUUsage)
+			totalCPUUsage += podCPUUsage
+		}
+	}
+	totalCPUCapacity := node.Status.Capacity.Cpu().MilliValue()
+	return float64(totalCPUCapacity-totalCPUUsage) / float64(totalCPUCapacity)
 }
 
 func fromOriginalResourceName(name, suffix string) string {
