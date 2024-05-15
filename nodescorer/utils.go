@@ -28,10 +28,10 @@ func computeNodeRunResult(strategy scalesim.StrategyWeights, scaledNode *corev1.
 	nodeScore.NumAssignedPodsTotal = totalAssignedPods
 	nodeScore.NumAssignedPodsToNode = len(targetNodeAssignedPods)
 	// TODO enhance the wastescore by considering all resources
-	totalMemoryConsumed := int64(0)
 	//totalAllocatableMemory := scaledNode.Status.Allocatable.Memory().MilliValue()
-	totalMemoryCapacity := scaledNode.Status.Capacity.Memory().MilliValue()
+	totalMemoryConsumed := int64(0)
 	totalCPUUsage := int64(0)
+	totalMemoryCapacity := scaledNode.Status.Capacity.Memory().MilliValue()
 	totalCPUCapacity := scaledNode.Status.Capacity.Cpu().MilliValue()
 	for _, pod := range targetNodeAssignedPods {
 		podMemoryConsumed := int64(0)

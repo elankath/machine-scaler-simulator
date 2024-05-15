@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
@@ -93,7 +94,6 @@ func (a *access) DeleteNodesWithMatchingLabels(ctx context.Context, labels map[s
 
 func (a *access) CreatePods(ctx context.Context, podOrder string, pods ...corev1.Pod) error {
 	if podOrder == "desc" {
-		slog.Info("SORT")
 		totalMemoryRequested := int64(0)
 		totalCPURequested := int64(0)
 		for _, pod := range pods {
@@ -112,41 +112,35 @@ func (a *access) CreatePods(ctx context.Context, podOrder string, pods ...corev1
 		if totalMemoryRequested != 0 && totalCPURequested != 0 {
 			slices.SortFunc(pods, func(i, j corev1.Pod) int {
 				//return -i.Spec.Containers[0].Resources.Requests.Memory().Cmp(*j.Spec.Containers[0].Resources.Requests.Memory())
-				podIMemRequest := int64(0)
-				podICPURequest := int64(0)
-				podJMemRequest := int64(0)
-				podJCPURequest := int64(0)
+				podICPUSum := resource.Quantity{}
+				podIMemorySum := resource.Quantity{}
+				podJCPUSum := resource.Quantity{}
+				podJMemorySum := resource.Quantity{}
 
-				//Pod i requests
 				for _, container := range i.Spec.Containers {
-					containerResources, ok := container.Resources.Requests[corev1.ResourceMemory]
-					if ok {
-						podIMemRequest += containerResources.MilliValue()
+					if request, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
+						podICPUSum.Add(request)
 					}
-					containerResources, ok = container.Resources.Requests[corev1.ResourceCPU]
-					if ok {
-						podICPURequest += containerResources.MilliValue()
+					if request, ok := container.Resources.Requests[corev1.ResourceMemory]; ok {
+						podIMemorySum.Add(request)
 					}
 				}
-				//Pod j requests
+
 				for _, container := range j.Spec.Containers {
-					containerResources, ok := container.Resources.Requests[corev1.ResourceMemory]
-					if ok {
-						podJMemRequest += containerResources.MilliValue()
+					if request, ok := container.Resources.Requests[corev1.ResourceCPU]; ok {
+						podJCPUSum.Add(request)
 					}
-					containerResources, ok = container.Resources.Requests[corev1.ResourceCPU]
-					if ok {
-						podJCPURequest += containerResources.MilliValue()
+					if request, ok := container.Resources.Requests[corev1.ResourceMemory]; ok {
+						podJMemorySum.Add(request)
 					}
 				}
 
-				// Divide by 2 really needed here?
-				podIRequest := ((float64(podIMemRequest) / float64(totalMemoryRequested)) + (float64(podICPURequest) / float64(totalCPURequested))) / 2
-				podJRequest := ((float64(podJMemRequest) / float64(totalMemoryRequested)) + (float64(podJCPURequest) / float64(totalCPURequested))) / 2
+				podIScore := (float64(podIMemorySum.MilliValue()) / float64(totalMemoryRequested)) + (float64(podICPUSum.MilliValue()) / float64(totalCPURequested))
+				podJScore := (float64(podJMemorySum.MilliValue()) / float64(totalMemoryRequested)) + (float64(podJCPUSum.MilliValue()) / float64(totalCPURequested))
 
-				if podIRequest < podJRequest {
+				if podIScore < podJScore {
 					return 1
-				} else if podIRequest > podJRequest {
+				} else if podIScore > podJScore {
 					return -1
 				} else {
 					return 0
